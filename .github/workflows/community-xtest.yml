@@ -38,8 +38,11 @@ on:
       swift-ref:
         required: false
         type: string
-        default: latest
-        description: "OpenTDFKit ref: 'latest', branch, tag, or SHA"
+        # Stage-1 KAS path lives on OpenTDFKit main (and post-#48 releases).
+        # GitHub "latest" is still 3.0.0 (pre-KAS). Override with a tag once
+        # a Stage-1-capable release ships; use 'latest' only after that.
+        default: main
+        description: "OpenTDFKit ref: branch/tag/SHA (default main until Stage-1 release; 'latest' ok after)"
       platform-ref:
         required: false
         type: string
@@ -83,7 +86,7 @@ jobs:
       OTDFCTL_REF_IN: ${{ inputs.otdfctl-ref || 'latest' }}
       PYTHON_REF_IN: ${{ inputs.python-ref || 'latest' }}
       RUST_REF_IN: ${{ inputs.rust-ref || 'latest' }}
-      SWIFT_REF_IN: ${{ inputs.swift-ref || 'latest' }}
+      SWIFT_REF_IN: ${{ inputs.swift-ref || 'main' }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
