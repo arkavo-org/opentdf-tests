@@ -399,3 +399,31 @@ runs:
         log-output-if: true
         wait-for: 120s
         working-directory: otdf-test-platform
+
+    # Platform server.auth.issuer is http://127.0.0.1:8888/auth/realms/opentdf.
+    # stock xtest/test.env uses localhost:8888 — tokens minted there carry
+    # iss=http://localhost:8888/... and KAS rejects them as unauthenticated.
+    # Only rewrite the Keycloak/IdP host (port 8888). Leave PLATFORMURL/KASURL
+    # on localhost so manifest key-access hosts still match go@latest encrypt.
+    - name: Align test.env IdP host with platform issuer (IPv4)
+      shell: bash
+      run: |
+        set -euo pipefail
+        patched=0
+        for f in \
+          otdftests/xtest/test.env \
+          xtest/test.env \
+          "${GITHUB_WORKSPACE:-}/otdftests/xtest/test.env" \
+          "${GITHUB_WORKSPACE:-}/xtest/test.env"
+        do
+          [[ -f "$f" ]] || continue
+          tmp="${f}.aligned"
+          sed -e 's#http://localhost:8888#http://127.0.0.1:8888#g' "$f" >"$tmp"
+          mv "$tmp" "$f"
+          echo "Aligned Keycloak hosts in $f:"
+          grep -E '^(KCHOST|KCFULLURL|TOKENENDPOINT)=' "$f" || true
+          patched=1
+        done
+        if [[ "$patched" != "1" ]]; then
+          echo "Warning: no test.env found to align (ok if caller exports env another way)"
+        fi
