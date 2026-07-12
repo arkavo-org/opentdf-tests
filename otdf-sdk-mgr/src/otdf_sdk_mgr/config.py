@@ -57,12 +57,8 @@ SDK_GIT_URLS: dict[str, str] = {
     "js": "https://github.com/opentdf/web-sdk.git",
     "platform": "https://github.com/opentdf/platform.git",
     # Community SDKs (fork defaults; override with OTDF_RUST_GIT_URL etc.)
-    "rust": os.environ.get(
-        "OTDF_RUST_GIT_URL", "https://github.com/arkavo-org/opentdf-rs.git"
-    ),
-    "swift": os.environ.get(
-        "OTDF_SWIFT_GIT_URL", "https://github.com/arkavo-org/OpenTDFKit.git"
-    ),
+    "rust": os.environ.get("OTDF_RUST_GIT_URL", "https://github.com/arkavo-org/opentdf-rs.git"),
+    "swift": os.environ.get("OTDF_SWIFT_GIT_URL", "https://github.com/arkavo-org/OpenTDFKit.git"),
     "python": os.environ.get(
         "OTDF_PYTHON_GIT_URL", "https://github.com/b-long/opentdf-python-sdk.git"
     ),
