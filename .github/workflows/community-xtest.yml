@@ -15,6 +15,7 @@ on:
       - "xtest/**"
       - "otdf-sdk-mgr/**"
       - ".github/workflows/community-xtest.yml"
+      - ".github/actions/**"
       - "docs/community-xtest-design.md"
   push:
     branches: [main, community-xtest-stage1]
@@ -438,8 +439,10 @@ jobs:
       - id: load-extra-keys
         run: echo "EXTRA_KEYS=$(jq -c <otdftests/xtest/extra-keys.json)" >> "${GITHUB_OUTPUT}"
 
+      # Upstream start-up-with-containers uses apt-get for CA trust (Linux-only).
+      # Local composite mirrors it with macOS System keychain trust.
       - id: run-platform
-        uses: opentdf/platform/test/start-up-with-containers@11af44a5d4826ed281bf2e0e4e31d6ff6154b393
+        uses: ./otdftests/.github/actions/start-up-with-containers-macos
         with:
           platform-ref: ${{ env.PLATFORM_REF }}
           ec-tdf-enabled: true
