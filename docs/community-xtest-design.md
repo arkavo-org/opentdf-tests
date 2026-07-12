@@ -779,7 +779,7 @@ Gate: S1+S2 green against go@main (community encrypt→go decrypt and go encrypt
 
 ### Swift / macOS platform ops (v1 procedure)
 
-**Decision:** v1 Swift Stage-1 (when unlocked) runs on `macos-latest` **self-contained**.
+**Decision:** v1 Swift Stage-1 runs on `macos-15-intel` **self-contained** (Colima + platform + OpenTDFKitCLI). arm64 `macos-latest` cannot run Colima nested virt on GHA.
 
 | Step | Detail |
 |------|--------|
