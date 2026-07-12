@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -66,7 +66,7 @@ def generate(input_dir: Path, output_dir: Path) -> None:
             }
         )
 
-    generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    generated = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     feature_names: set[str] = set()
     for r in rows:
         feature_names.update((r["supports"].get("supports") or {}).keys())
