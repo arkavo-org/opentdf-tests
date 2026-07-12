@@ -1,9 +1,0 @@
-# Colima cold-start for Keycloak exceeds the stock platform healthcheck
-# (start_period 2m + 3 retries). Keep Keycloak "starting" longer.
-services:
-  keycloak:
-    healthcheck:
-      interval: 15s
-      timeout: 15s
-      retries: 40
-      start_period: 10m

@@ -6,7 +6,7 @@ This fork (`arkavo-org/opentdf-tests`) extends official OpenTDF `xtest` with **c
 |-----|------|----------------|
 | **Python** | [b-long/opentdf-python-sdk](https://github.com/b-long/opentdf-python-sdk) | **Enabled** — ubuntu, python ↔ go@main, Base TDF |
 | **Rust** | [arkavo-org/opentdf-rs](https://github.com/arkavo-org/opentdf-rs) | **Enabled** — ubuntu, RSA wrap + KasClient rewrap |
-| **Swift** | [arkavo-org/OpenTDFKit](https://github.com/arkavo-org/OpenTDFKit) | **Enabled** — `macos-15-intel` + Colima Docker for platform (CryptoKit; arm64 GHA lacks nested virt) |
+| **Swift** | [arkavo-org/OpenTDFKit](https://github.com/arkavo-org/OpenTDFKit) | **Enabled** — `macos-latest (native Postgres+Keycloak, no Docker)` + Colima Docker for platform (CryptoKit; arm64 GHA lacks nested virt) |
 
 Full design: [community-xtest-design.md](./community-xtest-design.md).  
 **Format naming:** [FORMATS.md](./FORMATS.md) (Base TDF vs ZTDF vs NanoTDF).

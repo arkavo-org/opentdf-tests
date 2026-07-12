@@ -1,9 +1,9 @@
-name: 'start-up-with-containers-macos'
+name: 'start-up-platform-macos-native'
 
-description: >
-  Start the OpenTDF Platform with containers on macOS (Colima).
-  Fork of opentdf/platform test/start-up-with-containers with Darwin CA trust
-  (security add-trusted-cert) instead of Linux apt-get/update-ca-certificates.
+description: >-
+  Start OpenTDF platform dependencies natively on macOS (no Docker/Colima):
+  Homebrew PostgreSQL, Keycloak JVM distribution, then platform binary.
+  Outputs match opentdf/platform test/start-up-with-containers for xtest.
 
 inputs:
   platform-ref:
@@ -12,32 +12,37 @@ inputs:
     default: 'main'
   extra-keys:
     required: false
-    description: A JSON array containing extra keys for the KAS to load. Each object should have 'kid', 'alg', 'private', and 'cert' fields.
+    description: >-
+      JSON array of extra KAS keys (kid, alg, privateKey, cert). Stage-1 may pass [].
     default: '[]'
   ec-tdf-enabled:
-    default: "false"
+    default: 'false'
     description: 'Whether to enable ECC wrapping for TDFs'
     required: false
   pqc-enabled:
-    default: "false"
-    description: 'Whether to enable post-quantum and hybrid PQ/T wrapping for TDFs'
+    default: 'false'
+    description: 'Whether to enable post-quantum / hybrid wrapping'
     required: false
   log-level:
-    default: "debug"
-    description: 'Log level for the platform (audit, debug, info, warn, error)'
+    default: 'debug'
+    description: 'Log level for the platform'
     required: false
   log-type:
-    default: "text"
+    default: 'json'
     description: 'Log format type (text, json)'
     required: false
   provision-policy-fixtures:
-    default: "true"
-    description: 'Whether to provision fixture policy data after bootstrapping the platform'
+    default: 'true'
+    description: 'Whether to provision fixture policy data'
+    required: false
+  keycloak-version:
+    default: '25.0.6'
+    description: 'Keycloak release version (must match platform CI image major)'
     required: false
 
 outputs:
   platform-working-dir:
-    description: 'The working directory for the running platform instance'
+    description: 'Working directory for the running platform instance'
     value: 'otdf-test-platform'
   platform-log-file:
     description: 'Path to the main platform/KAS log file'
@@ -57,94 +62,80 @@ runs:
         LOG_TYPE: ${{ inputs.log-type }}
         PROVISION_POLICY_FIXTURES: ${{ inputs.provision-policy-fixtures }}
       run: |
-        # Validate platform-ref (must contain only safe characters for a git ref)
+        set -euo pipefail
         if [[ ! "${PLATFORM_REF}" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
-          echo "Error: platform-ref must contain only alphanumeric characters, dots, underscores, hyphens, and forward slashes."
+          echo "Error: platform-ref has invalid characters."
           exit 1
         fi
-
-        # Validate extra-keys (must be a valid JSON array)
-        if ! jq -e 'type == "array"' <<< "${EXTRA_KEYS}" > /dev/null 2>&1; then
-          echo "Error: extra-keys must be a valid JSON array."
+        if ! jq -e 'type == "array"' <<< "${EXTRA_KEYS}" >/dev/null 2>&1; then
+          echo "Error: extra-keys must be a JSON array."
           exit 1
         fi
+        case "${EC_TDF_ENABLED}" in true|false) ;; *) echo "bad ec-tdf-enabled"; exit 1 ;; esac
+        case "${PQC_ENABLED}" in true|false) ;; *) echo "bad pqc-enabled"; exit 1 ;; esac
+        case "${LOG_LEVEL}" in audit|debug|info|warn|error) ;; *) echo "bad log-level"; exit 1 ;; esac
+        case "${LOG_TYPE}" in text|json) ;; *) echo "bad log-type"; exit 1 ;; esac
+        case "${PROVISION_POLICY_FIXTURES}" in true|false) ;; *) echo "bad provision-policy-fixtures"; exit 1 ;; esac
 
-        # Validate ec-tdf-enabled (must be true or false)
-        case "${EC_TDF_ENABLED}" in
-          true|false)
-            ;;
-          *)
-            echo "Error: ec-tdf-enabled must be 'true' or 'false'."
-            exit 1
-            ;;
-        esac
-
-        # Validate pqc-enabled (must be true or false)
-        case "${PQC_ENABLED}" in
-          true|false)
-            ;;
-          *)
-            echo "Error: pqc-enabled must be 'true' or 'false'."
-            exit 1
-            ;;
-        esac
-
-        # Validate log-level (only allowed values)
-        case "${LOG_LEVEL}" in
-          audit|debug|info|warn|error)
-            ;;
-          *)
-            echo "Error: log-level must be one of: audit, debug, info, warn, error."
-            exit 1
-            ;;
-        esac
-
-        # Validate log-type (only allowed values)
-        case "${LOG_TYPE}" in
-          text|json)
-            ;;
-          *)
-            echo "Error: log-type must be one of: text, json."
-            exit 1
-            ;;
-        esac
-
-        # Validate provision-policy-fixtures (must be true or false)
-        case "${PROVISION_POLICY_FIXTURES}" in
-          true|false)
-            ;;
-          *)
-            echo "Error: provision-policy-fixtures must be 'true' or 'false'."
-            exit 1
-            ;;
-        esac
     - name: Check out platform
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       with:
         repository: opentdf/platform
-        # use a distinct path to avoid conflicts
         path: otdf-test-platform
         ref: ${{ inputs.platform-ref }}
         persist-credentials: false
-    - name: Ensure yq and jq (macOS)
+
+    - name: Ensure jq / yq / openssl tooling
       shell: bash
       run: |
         set -euo pipefail
         command -v jq >/dev/null || brew install jq
-        if ! command -v yq >/dev/null; then
-          brew install yq
-        fi
-        yq --version
+        command -v yq >/dev/null || brew install yq
+        command -v openssl >/dev/null || brew install openssl@3
         jq --version
+        yq --version
 
-    - name: Download latest init-temp-keys.sh, docker-compose.yaml, and watch.sh
+    - name: Install OpenJDK (keytool + Keycloak)
       shell: bash
       run: |
-        curl -sSfL https://raw.githubusercontent.com/opentdf/platform/refs/tags/pqc-enabled/.github/scripts/init-temp-keys.sh > otdf-test-platform/.github/scripts/init-temp-keys.sh
-        curl -sSfL https://raw.githubusercontent.com/opentdf/platform/refs/tags/pqc-enabled/docker-compose.yaml > otdf-test-platform/docker-compose.yaml
-        curl -sSfL https://raw.githubusercontent.com/opentdf/platform/refs/tags/pqc-enabled/.github/scripts/watch.sh > otdf-test-platform/.github/scripts/watch.sh
-    - name: Set up go (platform's go version)
-      id: setup-go
+        set -euo pipefail
+        brew install openjdk@21
+        # Intel Homebrew: /usr/local ; Apple Silicon: /opt/homebrew
+        if [[ -d "$(brew --prefix openjdk@21)/libexec/openjdk.jdk/Contents/Home" ]]; then
+          echo "JAVA_HOME=$(brew --prefix openjdk@21)/libexec/openjdk.jdk/Contents/Home" >> "$GITHUB_ENV"
+          echo "$(brew --prefix openjdk@21)/bin" >> "$GITHUB_PATH"
+        else
+          echo "JAVA_HOME=$(/usr/libexec/java_home -v 21)" >> "$GITHUB_ENV"
+        fi
+
+    - name: Install and start PostgreSQL 15 (native)
+      shell: bash
+      run: |
+        set -euo pipefail
+        brew install postgresql@15
+        export PATH="$(brew --prefix postgresql@15)/bin:$PATH"
+        echo "$(brew --prefix postgresql@15)/bin" >> "$GITHUB_PATH"
+
+        PGDATA="${RUNNER_TEMP}/opentdf-pgdata"
+        echo "PGDATA=$PGDATA" >> "$GITHUB_ENV"
+        rm -rf "$PGDATA"
+        initdb -D "$PGDATA" --username=postgres --auth=trust --no-locale --encoding=UTF8
+        pg_ctl -D "$PGDATA" -l "${RUNNER_TEMP}/postgres.log" -o "-p 5432 -k ${RUNNER_TEMP}" start
+        # Wait for accept
+        for i in $(seq 1 30); do
+          if pg_isready -h localhost -p 5432 -U postgres; then break; fi
+          sleep 1
+        done
+        # Platform defaults: user postgres / password changeme / db opentdf
+        psql -h localhost -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+        ALTER USER postgres WITH PASSWORD 'changeme';
+        SELECT 'ok' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'opentdf');
+        SQL
+        psql -h localhost -p 5432 -U postgres -d postgres -tc "SELECT 1 FROM pg_database WHERE datname='opentdf'" | grep -q 1 \
+          || psql -h localhost -p 5432 -U postgres -d postgres -c "CREATE DATABASE opentdf OWNER postgres;"
+        echo "PostgreSQL ready on localhost:5432 (db=opentdf)"
+
+    - name: Set up Go (platform go.work)
       uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
       with:
         go-version-file: 'otdf-test-platform/go.work'
@@ -153,248 +144,229 @@ runs:
           otdf-test-platform/service/go.sum
           otdf-test-platform/protocol/go/go.sum
           otdf-test-platform/sdk/go.sum
-    - name: Lookup current platform version
+
+    - name: Lookup platform version
       shell: bash
       id: platform-version
-      run: |-
+      working-directory: otdf-test-platform
+      run: |
+        set -euo pipefail
         if ! go run ./service version; then
-          # NOTE: the version command was added in 0.4.37
-          echo "Error: Unable to get platform version; defaulting to tag 0.3.0"
-          echo "semver=0.3.0" >> "$GITHUB_OUTPUT"
-          exit
-        fi
-        # Older version commands output version to stderr; newer versions output to stdout
-        raw_version=$(go run ./service version 2>&1)
-
-        # Sanitize: remove all characters except those allowed in semver (alphanumeric, dots, hyphens, plus)
-        # This prevents any potential code injection via the version string
-        sanitized_version=$(echo "$raw_version" | tr -cd '0-9a-zA-Z.+-')
-
-        # Validate version format (semver: x.y.z with optional pre-release/build metadata)
-        if [[ "$sanitized_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$ ]]; then
-          echo "semver=$sanitized_version" >> "$GITHUB_OUTPUT"
-          echo "## Platform version output: [$sanitized_version]"
-          exit 0
-        fi
-
-        echo "Warning: Platform version '$raw_version' doesn't match expected semver format. Extracting version numbers."
-        resanitized_version=$(echo "$sanitized_version" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-        if [[ -z "$resanitized_version" ]]; then
-          echo "## Error: Could not extract valid version, defaulting to 0.0.0"
           echo "semver=0.0.0" >> "$GITHUB_OUTPUT"
           exit 0
         fi
-        if [[ "$resanitized_version" =~ ^[0-9a-zA-Z.+-]+$ ]]; then
-          echo "semver=$resanitized_version" >> "$GITHUB_OUTPUT"
-          echo "## Platform version output: [$resanitized_version]"
-          exit 0
+        raw_version=$(go run ./service version 2>&1)
+        sanitized_version=$(echo "$raw_version" | tr -cd '0-9a-zA-Z.+-')
+        if [[ "$sanitized_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+          echo "semver=$sanitized_version" >> "$GITHUB_OUTPUT"
+        else
+          echo "semver=0.0.0" >> "$GITHUB_OUTPUT"
         fi
-        echo "## Error: Version contains unsafe characters after sanitization. Using fallback 0.0.0."
-        echo "semver=0.0.0" >> "$GITHUB_OUTPUT"
-      working-directory: otdf-test-platform
-    - name: Provide the platform with keys
+
+    - name: Generate KAS / TLS keys (no Docker)
       shell: bash
-      run: .github/scripts/init-temp-keys.sh
       working-directory: otdf-test-platform
-    - name: Map the config to the keys
+      run: |
+        set -euo pipefail
+        # Same crypto as init-temp-keys.sh, but keytool runs on the host JDK
+        # (upstream script shells out to docker for keytool only).
+        opt_output="."
+        openssl genpkey -algorithm RSA -out "$opt_output/kas-private.pem" -pkeyopt rsa_keygen_bits:2048
+        openssl rsa -in "$opt_output/kas-private.pem" -pubout -out "$opt_output/kas-cert.pem"
+        openssl ecparam -name prime256v1 >ecparams.tmp
+        openssl req -x509 -nodes -newkey ec:ecparams.tmp -subj "/CN=kas" \
+          -keyout "$opt_output/kas-ec-private.pem" -out "$opt_output/kas-ec-cert.pem" -days 365
+        go run ./service/cmd/keygen -output "$opt_output"
+
+        mkdir -p keys
+        openssl req -x509 -nodes -newkey RSA:2048 -subj "/CN=ca" \
+          -keyout keys/keycloak-ca-private.pem -out keys/keycloak-ca.pem -days 365
+        printf "subjectAltName=DNS:localhost,IP:127.0.0.1" >keys/sanX509.conf
+        printf "[req]\ndistinguished_name=req_distinguished_name\n[req_distinguished_name]\n[alt_names]\nDNS.1=localhost\nIP.1=127.0.0.1" >keys/req.conf
+        openssl req -new -nodes -newkey rsa:2048 -keyout keys/localhost.key -out keys/localhost.req \
+          -batch -subj "/CN=localhost" -config keys/req.conf
+        openssl x509 -req -in keys/localhost.req -CA keys/keycloak-ca.pem -CAkey keys/keycloak-ca-private.pem \
+          -CAcreateserial -out keys/localhost.crt -days 3650 -sha256 -extfile keys/sanX509.conf
+        openssl pkcs12 -export -in keys/keycloak-ca.pem -inkey keys/keycloak-ca-private.pem \
+          -out keys/ca.p12 -nodes -passout pass:password
+        keytool -importkeystore \
+          -srckeystore keys/ca.p12 -srcstoretype PKCS12 \
+          -destkeystore keys/ca.jks -deststoretype JKS \
+          -srcstorepass password -deststorepass password -noprompt
+        # Place default RSA/EC key material next to config for cryptoProvider paths
+        cp -f kas-private.pem kas-cert.pem kas-ec-private.pem kas-ec-cert.pem keys/ 2>/dev/null || true
+        chmod -R a+rX keys
+        ls -la keys | head -30
+
+    - name: Map config keys + enable Stage-1 options
       shell: bash
+      working-directory: otdf-test-platform
       env:
         EXTRA_KEYS: ${{ inputs.extra-keys }}
         PLATFORM_VERSION: ${{ steps.platform-version.outputs.semver }}
+        EC_TDF_ENABLED: ${{ inputs.ec-tdf-enabled }}
+        PQC_ENABLED: ${{ inputs.pqc-enabled }}
+        LOG_LEVEL: ${{ inputs.log-level }}
+        LOG_TYPE: ${{ inputs.log-type }}
       run: |
-        set -e
+        set -euo pipefail
         allowed_algorithms=(ec:secp256r1 rsa:2048)
-        if echo $PLATFORM_VERSION | awk -F. '{ if ($1 > 0 || ($1 == 0 && $2 > 7) || ($1 == 0 && $2 == 7 && $3 >= 1)) exit 0; else exit 1; }'; then
-          # For versions 0.7.1 and later, we allow rsa:4096 ec:secp384r1 ec:secp521r1
+        if echo "$PLATFORM_VERSION" | awk -F. '{ if ($1 > 0 || ($1 == 0 && $2 > 7) || ($1 == 0 && $2 == 7 && $3 >= 1)) exit 0; else exit 1; }'; then
           allowed_algorithms+=(rsa:4096 ec:secp384r1 ec:secp521r1 hpqt:xwing hpqt:secp256r1-mlkem768 hpqt:secp384r1-mlkem1024)
         fi
         keyring='[{"kid":"ec1","alg":"ec:secp256r1"},{"kid":"r1","alg":"rsa:2048"}]'
         keys='[{"kid":"e1","alg":"ec:secp256r1","private":"kas-ec-private.pem","cert":"kas-ec-cert.pem"},{"kid":"ec1","alg":"ec:secp256r1","private":"kas-ec-private.pem","cert":"kas-ec-cert.pem"},{"kid":"r1","alg":"rsa:2048","private":"kas-private.pem","cert":"kas-cert.pem"}]'
         while IFS= read -r key_json; do
-          printf 'processing %s\n' "${key_json}"
+          [[ -z "$key_json" || "$key_json" == "null" ]] && continue
           alg="$(jq -r '.alg' <<< "${key_json}")"
+          kid="$(jq -r '.kid' <<< "${key_json}")"
           if [[ ! " ${allowed_algorithms[*]} " =~ " ${alg} " ]]; then
-            printf 'algorithm [%s] is not allowed. Skipping extra key [%s]\n' "${alg}" "${kid}" 1>&2
+            echo "skip extra key alg=$alg kid=$kid"
             continue
+          fi
+          if [[ ! "${kid}" =~ ^[-0-9a-zA-Z_]+$ ]]; then
+            echo "invalid kid $kid" >&2
+            exit 1
           fi
           private_pem="$(jq -r '.privateKey' <<< "${key_json}")"
           cert_pem="$(jq -r '.cert' <<< "${key_json}")"
-          kid="$(jq -r '.kid' <<< "${key_json}")"
-
-          # don't allow injection of paths. the regex can't be quoted in bash
-          if [[ ! "${kid}" =~ ^[-0-9a-zA-Z_]+$ ]]; then
-            printf 'kid is not valid: [%s]\n' "${kid}" 1>&2
-            exit 1
-          fi
-
           private_path="${kid}.pem"
           cert_path="${kid}-cert.pem"
-
           echo "${private_pem}" >"${private_path}"
           echo "${cert_pem}" >"${cert_path}"
           chmod a+r "${private_path}" "${cert_path}"
-
           key_obj="$(jq '{kid, alg, private: $private, cert: $cert}' --arg private "${private_path}" --arg cert "${cert_path}" <<< "${key_json}")"
           keys="$(jq '. + [$key_obj]' --argjson key_obj "${key_obj}" <<< "${keys}")"
-
           keyring_obj="$(jq '{kid, alg}' <<< "${key_json}")"
           keyring="$(jq '. + [$keyring_obj]' --argjson keyring_obj "${keyring_obj}" <<< "${keyring}")"
-
-        done < <(jq -c '.[]' <<< "${EXTRA_KEYS}")
-
-        printf 'adding the following keys:\n  [%s]\n[%s]  \n' "${keys}" "${keyring}"
+        done < <(jq -c '.[]?' <<< "${EXTRA_KEYS}")
 
         yq_command="$(printf '(.services.kas.keyring = %s) | (.server.cryptoProvider.standard.keys = %s)' "${keyring}" "${keys}")"
-
         <opentdf-dev.yaml >opentdf.yaml yq e "${yq_command}"
 
-      working-directory: otdf-test-platform
-    - name: Enable ECC wrapping for TDFs
-      shell: bash
-      if: ${{ inputs.ec-tdf-enabled == 'true' }}
-      run: |
-        yq e '.services.kas.ec_tdf_enabled = true' -i opentdf.yaml
-      working-directory: otdf-test-platform
-    - name: Enable PQ (mlkem, xwing, and hybrid) wrapping for TDFs
-      shell: bash
-      if: ${{ inputs.pqc-enabled == 'true' }}
-      run: |
+        # Explicit local DB (platform defaults, but be clear for native postgres)
         yq e '
-          (.services.kas.preview.hybrid_tdf_enabled = true)
-          | (.services.kas.keyring += [{"kid":"x1","alg":"hpqt:xwing"},{"kid":"h1","alg":"hpqt:secp256r1-mlkem768"},{"kid":"h2","alg":"hpqt:secp384r1-mlkem1024"}])
-          | (.server.cryptoProvider.standard.keys += [{"kid":"x1","alg":"hpqt:xwing","private":"kas-xwing-private.pem","cert":"kas-xwing-public.pem"},{"kid":"h1","alg":"hpqt:secp256r1-mlkem768","private":"kas-p256mlkem768-private.pem","cert":"kas-p256mlkem768-public.pem"},{"kid":"h2","alg":"hpqt:secp384r1-mlkem1024","private":"kas-p384mlkem1024-private.pem","cert":"kas-p384mlkem1024-public.pem"}])
+          (.db.host = "localhost")
+          | (.db.port = 5432)
+          | (.db.user = "postgres")
+          | (.db.password = "changeme")
+          | (.db.database = "opentdf")
+          | (.db.sslmode = "disable")
+        ' -i opentdf.yaml || \
+        yq e '
+          (.db.host = "localhost")
+          | (.db.port = 5432)
+          | (.db.user = "postgres")
+          | (.db.password = "changeme")
+          | (.db.sslmode = "disable")
         ' -i opentdf.yaml
-      working-directory: otdf-test-platform
-    - name: Configure logging
-      shell: bash
-      env:
-        LOG_LEVEL: ${{ inputs.log-level }}
-        LOG_TYPE: ${{ inputs.log-type }}
-      run: |
-        yq e '(.logger.level = env(LOG_LEVEL)) | (.logger.type = env(LOG_TYPE))' -i opentdf.yaml
-      working-directory: otdf-test-platform
-    - name: Trust the generated certs (macOS)
-      shell: bash
-      run: |
-        set -euo pipefail
-        sudo chmod -R 777 ./keys
-        # Prefer CA if present; else the localhost server cert from init-temp-keys.
-        CERT=""
-        for c in ./keys/ca.crt ./keys/localhost.crt ./keys/kas-cert.pem; do
-          if [[ -f "$c" ]]; then CERT="$c"; break; fi
-        done
-        if [[ -z "$CERT" ]]; then
-          echo "No trust anchor found under ./keys" >&2
-          ls -la ./keys || true
-          exit 1
-        fi
-        echo "Trusting $CERT in System keychain for Swift URLSession"
-        # -d add to admin cert store; -r trustRoot always trust as root
-        sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "$CERT"
 
-        # Go/curl/uv use SSL_CERT_FILE as a *replacement* bundle, not an additive
-        # trust store. Point it at system roots + platform cert so PyPI still works.
-        COMBINED="$(pwd)/keys/ca-bundle-with-platform.pem"
-        : > "$COMBINED"
-        for roots in \
-          /etc/ssl/cert.pem \
-          /private/etc/ssl/cert.pem \
-          /etc/ssl/certs/ca-certificates.crt
-        do
-          if [[ -f "$roots" ]]; then
-            cat "$roots" >> "$COMBINED"
-            break
-          fi
-        done
-        # Always export macOS system roots (covers missing /etc/ssl/cert.pem).
-        security find-certificate -a -p \
-          /System/Library/Keychains/SystemRootCertificates.keychain \
-          >> "$COMBINED" 2>/dev/null || true
-        security find-certificate -a -p \
-          /Library/Keychains/System.keychain \
-          >> "$COMBINED" 2>/dev/null || true
-        cat "$CERT" >> "$COMBINED"
-        ABS_COMBINED="$(cd "$(dirname "$COMBINED")" && pwd)/$(basename "$COMBINED")"
-        ABS_CERT="$(cd "$(dirname "$CERT")" && pwd)/$(basename "$CERT")"
-        echo "SSL_CERT_FILE=$ABS_COMBINED" >> "$GITHUB_ENV"
-        # Node treats this as *extra* CAs (safe for public HTTPS).
-        echo "NODE_EXTRA_CA_CERTS=$ABS_CERT" >> "$GITHUB_ENV"
-        echo "Combined CA bundle: $ABS_COMBINED ($(wc -c < "$COMBINED") bytes)"
-      working-directory: otdf-test-platform
-    - name: Spin up platform's containerized resources
+        if [[ "${EC_TDF_ENABLED}" == "true" ]]; then
+          yq e '.services.kas.ec_tdf_enabled = true' -i opentdf.yaml || \
+            yq e '.services.kas.preview.ec_tdf_enabled = true' -i opentdf.yaml || true
+        fi
+        if [[ "${PQC_ENABLED}" == "true" ]]; then
+          yq e '
+            (.services.kas.preview.hybrid_tdf_enabled = true)
+            | (.services.kas.keyring += [{"kid":"x1","alg":"hpqt:xwing"},{"kid":"h1","alg":"hpqt:secp256r1-mlkem768"},{"kid":"h2","alg":"hpqt:secp384r1-mlkem1024"}])
+            | (.server.cryptoProvider.standard.keys += [{"kid":"x1","alg":"hpqt:xwing","private":"kas-xwing-private.pem","cert":"kas-xwing-public.pem"},{"kid":"h1","alg":"hpqt:secp256r1-mlkem768","private":"kas-p256mlkem768-private.pem","cert":"kas-p256mlkem768-public.pem"},{"kid":"h2","alg":"hpqt:secp384r1-mlkem1024","private":"kas-p384mlkem1024-private.pem","cert":"kas-p384mlkem1024-public.pem"}])
+          ' -i opentdf.yaml || true
+        fi
+        yq e '(.logger.level = env(LOG_LEVEL)) | (.logger.type = env(LOG_TYPE))' -i opentdf.yaml
+        echo "--- opentdf.yaml kas/auth snippet ---"
+        yq e '.services.kas.keyring, .server.auth.issuer, .db' opentdf.yaml || true
+
+    - name: Download and start Keycloak (native JVM)
       shell: bash
       env:
-        ACTION_PATH: ${{ github.action_path }}
+        KEYCLOAK_VERSION: ${{ inputs.keycloak-version }}
       run: |
         set -euo pipefail
-        # Under Colima the stock Keycloak healthcheck (in-container Java HTTPS
-        # to management :9001/auth/health/live) stays unhealthy even after
-        # Quarkus reports "started" and listens on :8888/:8443/:9001.
-        # Start without --wait and poll host-reachable HTTP instead.
-        OVERRIDE="${ACTION_PATH}/docker-compose.macos.override.yml"
-        if [[ -f "$OVERRIDE" ]]; then
-          cp "$OVERRIDE" docker-compose.macos.override.yml
-          export COMPOSE_FILE="docker-compose.yaml:docker-compose.macos.override.yml"
-          echo "Using COMPOSE_FILE=$COMPOSE_FILE"
-        fi
-        docker compose up -d
-        echo "Waiting for postgres..."
-        for i in $(seq 1 60); do
-          if docker compose exec -T opentdfdb pg_isready -q 2>/dev/null; then
-            echo "postgres ready (attempt $i)"
-            break
-          fi
-          sleep 5
-        done
-        echo "Waiting for Keycloak HTTP on localhost:8888/auth/ ..."
+        KC_ROOT="${RUNNER_TEMP}/keycloak"
+        mkdir -p "$KC_ROOT"
+        archive="keycloak-${KEYCLOAK_VERSION}.tar.gz"
+        url="https://github.com/keycloak/keycloak/releases/download/${KEYCLOAK_VERSION}/${archive}"
+        echo "Downloading $url"
+        curl -fsSL -o "${RUNNER_TEMP}/${archive}" "$url"
+        tar -xzf "${RUNNER_TEMP}/${archive}" -C "$KC_ROOT" --strip-components=1
+
+        export KEYCLOAK_ADMIN=admin
+        export KEYCLOAK_ADMIN_PASSWORD=changeme
+        export KC_HTTP_ENABLED=true
+        export KC_HTTP_PORT=8888
+        export KC_HTTP_RELATIVE_PATH=/auth
+        export KC_HOSTNAME_STRICT=false
+        export KC_HOSTNAME_STRICT_HTTPS=false
+        export KC_PROXY=edge
+        export KC_FEATURES=preview,token-exchange
+        export KC_HEALTH_ENABLED=true
+        # Stage-1 uses HTTP IdP URLs in test.env (no container TLS path needed).
+        nohup "$KC_ROOT/bin/kc.sh" start-dev --verbose \
+          >"${RUNNER_TEMP}/keycloak.log" 2>&1 &
+        echo $! >"${RUNNER_TEMP}/keycloak.pid"
+        echo "Keycloak pid=$(cat "${RUNNER_TEMP}/keycloak.pid")"
+
+        echo "Waiting for Keycloak http://127.0.0.1:8888/auth/ ..."
         ready=0
         for i in $(seq 1 90); do
-          # Any HTTP response from the auth root means the process is listening.
           code=$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 2 \
             "http://127.0.0.1:8888/auth/" 2>/dev/null || echo "000")
-          if [[ "$code" != "000" && "$code" != "" ]]; then
-            echo "keycloak HTTP ready (status=$code, attempt $i)"
+          if [[ "$code" != "000" && -n "$code" ]]; then
+            echo "Keycloak ready (HTTP $code) after attempt $i"
             ready=1
             break
           fi
           if (( i % 6 == 0 )); then
-            echo "  still waiting for keycloak... attempt $i (last code=$code)"
-            docker compose ps || true
+            echo "  still waiting ($i) last=$code"
+            tail -5 "${RUNNER_TEMP}/keycloak.log" || true
           fi
-          sleep 10
+          sleep 5
         done
         if [[ "$ready" != "1" ]]; then
-          echo "::error::Keycloak did not become reachable on :8888 within timeout"
-          docker compose ps -a || true
-          docker compose logs --no-color --tail=300 keycloak || true
+          echo "::error::Keycloak failed to become ready"
+          tail -200 "${RUNNER_TEMP}/keycloak.log" || true
           exit 1
         fi
-        docker compose ps
-      working-directory: otdf-test-platform
-    - name: Provision realms/clients/users into idP
+
+    - name: Provision Keycloak realm / clients
       shell: bash
-      run: go run ./service provision keycloak
       working-directory: otdf-test-platform
-    - name: Provision test fixture policy
+      run: go run ./service provision keycloak
+
+    - name: Provision policy fixtures
       if: ${{ inputs.provision-policy-fixtures == 'true' }}
       shell: bash
-      run: go run ./service provision fixtures
       working-directory: otdf-test-platform
-    - name: Set platform log file path
+      run: go run ./service provision fixtures
+
+    - name: Set platform log path
       id: log-path
       shell: bash
       run: |
         LOG_FILE="otdf-test-platform/logs/kas-main.log"
+        mkdir -p otdf-test-platform/logs
         echo "log-file=$LOG_FILE" >> "$GITHUB_OUTPUT"
-        echo "Platform log file will be: $LOG_FILE"
+        echo "Platform log file: $LOG_FILE"
+
+    - name: Fetch platform watch.sh helper
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p otdf-test-platform/.github/scripts
+        curl -fsSL \
+          "https://raw.githubusercontent.com/opentdf/platform/refs/tags/pqc-enabled/.github/scripts/watch.sh" \
+          -o otdf-test-platform/.github/scripts/watch.sh
+        chmod +x otdf-test-platform/.github/scripts/watch.sh
+
     - name: Start platform server in background
       uses: JarvusInnovations/background-action@2428e7b970a846423095c79d43f759abf979a635 # v1.0.7
       with:
         run: >
           go build -o opentdf -v service/main.go
+          && mkdir -p logs
           && .github/scripts/watch.sh --tee-err-to logs/kas-main.log opentdf.yaml ./opentdf start
         wait-on: |
           tcp:localhost:8080
         log-output-if: true
-        wait-for: 90s
+        wait-for: 120s
         working-directory: otdf-test-platform
