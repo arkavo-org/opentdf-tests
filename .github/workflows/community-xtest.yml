@@ -2,7 +2,8 @@
 #
 # Stage-1 (this workflow): community SDK ↔ go@main, Base TDF (tdf) only, -m stage1.
 # (Not NATO ZTDF; not NanoTDF. See docs/FORMATS.md.)
-# Enabled: python (ubuntu), rust (ubuntu), swift (macos + colima/docker).
+# Enabled: python (ubuntu), rust (ubuntu), swift (macos-15-intel + Colima/Docker).
+# Swift uses Intel macOS because arm64 GHA runners lack nested virtualization for Colima.
 # No nanoTDF in Stage-1.
 #
 # Does NOT expand the official xtest.yml matrix.
@@ -398,13 +399,13 @@ jobs:
           path: otdftests/xtest/test-results/**
 
   # OpenTDFKit needs Apple CryptoKit/Security — stay on macOS (not Linux Swift).
-  # Platform deps use Docker via Colima on macos-latest (same machine as the Swift CLI).
+  # Platform + Docker: use macos-15-intel. arm64 GHA macOS (macos-latest) cannot run
+  # Colima (no nested virtualization); setup-docker-macos-action hard-fails on arm64.
+  # See: douglascamata/setup-docker-macos-action README; abiosoft/colima#970.
   community-swift:
     name: "swift ↔ go@main stage1"
-    runs-on: macos-latest
+    runs-on: macos-15-intel
     timeout-minutes: 90
-    # Colima on GHA can still flake; python/rust remain required in the capstone.
-    continue-on-error: true
     permissions:
       contents: read
       packages: read
@@ -420,8 +421,7 @@ jobs:
           path: otdftests
           persist-credentials: false
 
-      # Maintained helper: Homebrew docker + Colima/Lima on GitHub-hosted macOS.
-      # Prefer this over ad-hoc brew/colima start (vz failures on some images).
+      # Homebrew docker + Colima/Lima. Supported on macos-15-intel (x86_64).
       - name: Set up Docker on macOS
         uses: douglascamata/setup-docker-macos-action@v1.1.0
         with:
@@ -429,9 +429,11 @@ jobs:
 
       - name: Verify Docker
         run: |-
+          uname -m
           docker version
           docker info
           docker compose version || true
+          docker run --rm hello-world
 
       - id: load-extra-keys
         run: echo "EXTRA_KEYS=$(jq -c <otdftests/xtest/extra-keys.json)" >> "${GITHUB_OUTPUT}"
@@ -542,7 +544,7 @@ jobs:
           name: ${{ job.status == 'success' && '✅' || '❌' }} community-swift-stage1
           path: otdftests/xtest/test-results/**
 
-  # Capstone: require python + rust. Swift is best-effort on macos (continue-on-error).
+  # Capstone: require python + rust + swift Stage-1 (all kas-ready peers).
   community-xtest:
     runs-on: ubuntu-latest
     needs: [community-python, community-rust, community-swift]
@@ -551,14 +553,13 @@ jobs:
       contents: read
     steps:
       - name: Assert required community jobs passed
-        if: ${{ needs.community-python.result != 'success' || needs.community-rust.result != 'success' }}
+        if: ${{ needs.community-python.result != 'success' || needs.community-rust.result != 'success' || needs.community-swift.result != 'success' }}
         run: |
           echo "python=${{ needs.community-python.result }}" >> "$GITHUB_STEP_SUMMARY"
           echo "rust=${{ needs.community-rust.result }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "swift=${{ needs.community-swift.result }} (best-effort)" >> "$GITHUB_STEP_SUMMARY"
+          echo "swift=${{ needs.community-swift.result }}" >> "$GITHUB_STEP_SUMMARY"
           exit 1
       - name: Success
-        if: ${{ needs.community-python.result == 'success' && needs.community-rust.result == 'success' }}
+        if: ${{ needs.community-python.result == 'success' && needs.community-rust.result == 'success' && needs.community-swift.result == 'success' }}
         run: |
-          echo "Community Stage-1 required jobs (python + rust) succeeded." >> "$GITHUB_STEP_SUMMARY"
-          echo "swift=${{ needs.community-swift.result }} (best-effort, continue-on-error)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Community Stage-1 required jobs (python + rust + swift) succeeded." >> "$GITHUB_STEP_SUMMARY"
