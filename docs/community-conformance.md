@@ -5,7 +5,7 @@ This fork (`arkavo-org/opentdf-tests`) extends official OpenTDF `xtest` with **c
 | SDK | Repo | Stage-1 status |
 |-----|------|----------------|
 | **Python** | [b-long/opentdf-python-sdk](https://github.com/b-long/opentdf-python-sdk) | **Enabled** — ubuntu, python ↔ go@latest, Base TDF (`python-ref` default `latest`) |
-| **Rust** | [arkavo-org/opentdf-rs](https://github.com/arkavo-org/opentdf-rs) | **Enabled** — ubuntu, RSA wrap + KasClient rewrap (`rust-ref` default `main` until Stage-1 release) |
+| **Rust** | [arkavo-org/opentdf-rs](https://github.com/arkavo-org/opentdf-rs) | **Enabled** — ubuntu, RSA wrap + KasClient rewrap (`rust-ref` default `latest`, 0.14.0+) |
 | **Swift** | [arkavo-org/OpenTDFKit](https://github.com/arkavo-org/OpenTDFKit) | **Enabled** — `macos-latest`, native Postgres+Keycloak (no Docker/Colima); CryptoKit; pin default `latest` (4.0.0+) |
 
 Full design: [community-xtest-design.md](./community-xtest-design.md).  

@@ -33,11 +33,10 @@ on:
       rust-ref:
         required: false
         type: string
-        # Stage-1 KAS (hexless + RSA wrap/rewrap) is on main via #87; GitHub
-        # "latest" is still 0.13.0 (pre-Stage-1). Flip default to latest after
-        # a Stage-1-capable opentdf-rs release.
-        default: main
-        description: "opentdf-rs ref: branch/tag/SHA (default main until Stage-1 release; 'latest' ok after)"
+        # opentdf-rs 0.14.0+ is Stage-1 capable (hexless + RSA wrap/rewrap).
+        # Floating latest tracks current stable release.
+        default: latest
+        description: "opentdf-rs ref: 'latest' (floating release), branch, tag, or SHA"
       swift-ref:
         required: false
         type: string
@@ -87,7 +86,7 @@ jobs:
       PLATFORM_REF_IN: ${{ inputs.platform-ref || 'latest' }}
       OTDFCTL_REF_IN: ${{ inputs.otdfctl-ref || 'latest' }}
       PYTHON_REF_IN: ${{ inputs.python-ref || 'latest' }}
-      RUST_REF_IN: ${{ inputs.rust-ref || 'main' }}
+      RUST_REF_IN: ${{ inputs.rust-ref || 'latest' }}
       SWIFT_REF_IN: ${{ inputs.swift-ref || 'latest' }}
       GH_TOKEN: ${{ github.token }}
     steps:
