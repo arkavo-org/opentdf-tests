@@ -40,9 +40,9 @@ if [[ "${1:-}" == "supports" ]]; then
       exit 0
       ;;
     assertions | assertion_verification | attribute_traversal | audit_logging | \
-    better-messages-2024 | bulk_rewrap | dpop | dpop_nonce_challenge | ecwrap | \
-    hexaflexible | key_management | mechanism-rsa-4096 | mechanism-ec-curves-384-521 | \
-    mechanism-xwing | mechanism-secpmlkem | mechanism-mlkem | ns_grants | obligations)
+      better-messages-2024 | bulk_rewrap | dpop | dpop_nonce_challenge | ecwrap | \
+      hexaflexible | key_management | mechanism-rsa-4096 | mechanism-ec-curves-384-521 | \
+      mechanism-xwing | mechanism-secpmlkem | mechanism-mlkem | ns_grants | obligations)
       exit 1
       ;;
     *)
