@@ -324,26 +324,49 @@ runs:
     - name: Spin up platform's containerized resources
       shell: bash
       env:
-        # Path to this composite action (GitHub sets github.action_path for composites).
         ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
-        # Keycloak Quarkus cold-start under Colima exceeds stock healthchecks.
-        # Override file lives next to this action.yml (do not inline YAML here —
-        # unindented heredocs break action.yml parsing).
+        # Under Colima the stock Keycloak healthcheck (in-container Java HTTPS
+        # to management :9001/auth/health/live) stays unhealthy even after
+        # Quarkus reports "started" and listens on :8888/:8443/:9001.
+        # Start without --wait and poll host-reachable HTTP instead.
         OVERRIDE="${ACTION_PATH}/docker-compose.macos.override.yml"
-        if [[ ! -f "$OVERRIDE" ]]; then
-          echo "::error::missing override: $OVERRIDE"
-          exit 1
+        if [[ -f "$OVERRIDE" ]]; then
+          cp "$OVERRIDE" docker-compose.macos.override.yml
+          export COMPOSE_FILE="docker-compose.yaml:docker-compose.macos.override.yml"
+          echo "Using COMPOSE_FILE=$COMPOSE_FILE"
         fi
-        cp "$OVERRIDE" docker-compose.macos.override.yml
-        export COMPOSE_FILE="docker-compose.yaml:docker-compose.macos.override.yml"
-        echo "Using COMPOSE_FILE=$COMPOSE_FILE"
-        if ! docker compose up -d --wait --wait-timeout 900; then
-          echo "::error::docker compose failed; dumping service status and logs"
+        docker compose up -d
+        echo "Waiting for postgres..."
+        for i in $(seq 1 60); do
+          if docker compose exec -T opentdfdb pg_isready -q 2>/dev/null; then
+            echo "postgres ready (attempt $i)"
+            break
+          fi
+          sleep 5
+        done
+        echo "Waiting for Keycloak HTTP on localhost:8888/auth/ ..."
+        ready=0
+        for i in $(seq 1 90); do
+          # Any HTTP response from the auth root means the process is listening.
+          code=$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 2 \
+            "http://127.0.0.1:8888/auth/" 2>/dev/null || echo "000")
+          if [[ "$code" != "000" && "$code" != "" ]]; then
+            echo "keycloak HTTP ready (status=$code, attempt $i)"
+            ready=1
+            break
+          fi
+          if (( i % 6 == 0 )); then
+            echo "  still waiting for keycloak... attempt $i (last code=$code)"
+            docker compose ps || true
+          fi
+          sleep 10
+        done
+        if [[ "$ready" != "1" ]]; then
+          echo "::error::Keycloak did not become reachable on :8888 within timeout"
           docker compose ps -a || true
           docker compose logs --no-color --tail=300 keycloak || true
-          docker compose logs --no-color --tail=100 opentdfdb || true
           exit 1
         fi
         docker compose ps
