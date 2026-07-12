@@ -33,16 +33,18 @@ on:
       rust-ref:
         required: false
         type: string
-        default: latest
-        description: "opentdf-rs ref: 'latest', branch, tag, or SHA"
+        # Stage-1 KAS (hexless + RSA wrap/rewrap) is on main via #87; GitHub
+        # "latest" is still 0.13.0 (pre-Stage-1). Flip default to latest after
+        # a Stage-1-capable opentdf-rs release.
+        default: main
+        description: "opentdf-rs ref: branch/tag/SHA (default main until Stage-1 release; 'latest' ok after)"
       swift-ref:
         required: false
         type: string
-        # Stage-1 KAS path lives on OpenTDFKit main (and post-#48 releases).
-        # GitHub "latest" is still 3.0.0 (pre-KAS). Override with a tag once
-        # a Stage-1-capable release ships; use 'latest' only after that.
-        default: main
-        description: "OpenTDFKit ref: branch/tag/SHA (default main until Stage-1 release; 'latest' ok after)"
+        # OpenTDFKit 4.0.0+ is Stage-1 capable (KAS well-known fallback, OAEP-SHA1,
+        # GMAC integrity). Floating latest tracks current stable release.
+        default: latest
+        description: "OpenTDFKit ref: 'latest' (floating release), branch, tag, or SHA"
       platform-ref:
         required: false
         type: string
@@ -85,8 +87,8 @@ jobs:
       PLATFORM_REF_IN: ${{ inputs.platform-ref || 'latest' }}
       OTDFCTL_REF_IN: ${{ inputs.otdfctl-ref || 'latest' }}
       PYTHON_REF_IN: ${{ inputs.python-ref || 'latest' }}
-      RUST_REF_IN: ${{ inputs.rust-ref || 'latest' }}
-      SWIFT_REF_IN: ${{ inputs.swift-ref || 'main' }}
+      RUST_REF_IN: ${{ inputs.rust-ref || 'main' }}
+      SWIFT_REF_IN: ${{ inputs.swift-ref || 'latest' }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

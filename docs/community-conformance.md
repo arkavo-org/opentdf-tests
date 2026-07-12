@@ -4,9 +4,9 @@ This fork (`arkavo-org/opentdf-tests`) extends official OpenTDF `xtest` with **c
 
 | SDK | Repo | Stage-1 status |
 |-----|------|----------------|
-| **Python** | [b-long/opentdf-python-sdk](https://github.com/b-long/opentdf-python-sdk) | **Enabled** — ubuntu, python ↔ go@main, Base TDF |
-| **Rust** | [arkavo-org/opentdf-rs](https://github.com/arkavo-org/opentdf-rs) | **Enabled** — ubuntu, RSA wrap + KasClient rewrap |
-| **Swift** | [arkavo-org/OpenTDFKit](https://github.com/arkavo-org/OpenTDFKit) | **Enabled** — `macos-latest (native Postgres+Keycloak, no Docker)` + Colima Docker for platform (CryptoKit; arm64 GHA lacks nested virt) |
+| **Python** | [b-long/opentdf-python-sdk](https://github.com/b-long/opentdf-python-sdk) | **Enabled** — ubuntu, python ↔ go@latest, Base TDF (`python-ref` default `latest`) |
+| **Rust** | [arkavo-org/opentdf-rs](https://github.com/arkavo-org/opentdf-rs) | **Enabled** — ubuntu, RSA wrap + KasClient rewrap (`rust-ref` default `main` until Stage-1 release) |
+| **Swift** | [arkavo-org/OpenTDFKit](https://github.com/arkavo-org/OpenTDFKit) | **Enabled** — `macos-latest`, native Postgres+Keycloak (no Docker/Colima); CryptoKit; pin default `latest` (4.0.0+) |
 
 Full design: [community-xtest-design.md](./community-xtest-design.md).  
 **Format naming:** [FORMATS.md](./FORMATS.md) (Base TDF vs ZTDF vs NanoTDF).
@@ -52,7 +52,7 @@ Workflow: `.github/workflows/community-xtest.yml`
 
 - Runs on PRs that touch xtest / otdf-sdk-mgr / the workflow
 - Spins up platform via `opentdf/platform` composite action
-- Builds go@main + community CLI(s)
+- Builds go@latest (floating otdfctl release) + community CLI(s)
 - Publishes HTML + junit + `supports.json` artifacts
 - Human report: https://arkavo-org.github.io/opentdf-tests/ (branch Pages)
 
