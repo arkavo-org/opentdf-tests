@@ -161,12 +161,16 @@ def pytest_generate_tests(metafunc: pytest.Metafunc):
         return a
 
     def sdk_specs_opt(names: list[str]) -> list[str]:
-        """Return SDK specifier tokens from the first matching option, or all sdk types."""
+        """Return SDK specifier tokens from the first matching option.
+
+        Default is official SDKs only (go/java/js) so community dists are
+        opt-in via --sdks / --sdks-encrypt / --sdks-decrypt.
+        """
         for name in names:
             v = metafunc.config.getoption(name)
             if v:
                 return v.split()
-        return list(typing.get_args(tdfs.sdk_type))
+        return list(tdfs.OFFICIAL_SDKS)
 
     subject_sdks: set[tdfs.SDK] = set()
 

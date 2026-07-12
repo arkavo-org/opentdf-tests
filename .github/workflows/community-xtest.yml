@@ -1,0 +1,280 @@
+# Community SDK cross-tests (fork of opentdf/tests).
+#
+# Stage-1 (this workflow): community SDK ↔ go@main, ztdf only, -m stage1.
+# Currently enabled: python (kas-ready).
+# Swift/Rust: offline until their KAS/OAuth CLI work lands (see docs/community-xtest-design.md).
+#
+# Does NOT expand the official xtest.yml matrix.
+name: Community X-Test
+
+on:
+  pull_request:
+    paths:
+      - "xtest/**"
+      - "otdf-sdk-mgr/**"
+      - ".github/workflows/community-xtest.yml"
+      - "docs/community-xtest-design.md"
+  push:
+    branches: [main, community-xtest-stage1]
+  workflow_dispatch:
+    inputs:
+      python-ref:
+        required: false
+        type: string
+        default: main
+        description: "opentdf-python-sdk ref (branch, tag, or SHA)"
+      platform-ref:
+        required: false
+        type: string
+        default: main
+        description: "opentdf/platform ref"
+      otdfctl-ref:
+        required: false
+        type: string
+        default: main
+        description: "otdfctl / go SDK ref for peer + attribute fixtures"
+      focus:
+        required: false
+        type: string
+        default: python
+        description: "community SDK focus (python only for Stage-1)"
+
+concurrency:
+  group: community-xtest-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  community-python:
+    name: "python ↔ go@main stage1"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: read
+      checks: write
+      pull-requests: write
+    env:
+      PYTHON_REF: ${{ inputs.python-ref || 'main' }}
+      PLATFORM_REF: ${{ inputs.platform-ref || 'main' }}
+      OTDFCTL_REF: ${{ inputs.otdfctl-ref || 'main' }}
+      FOCUS_SDK: ${{ inputs.focus || 'python' }}
+
+    steps:
+      - name: Checkout tests fork
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: otdftests
+          persist-credentials: false
+
+      - name: Load extra keys
+        id: load-extra-keys
+        run: echo "EXTRA_KEYS=$(jq -c <otdftests/xtest/extra-keys.json)" >> "${GITHUB_OUTPUT}"
+
+      - name: Start platform with containers
+        id: run-platform
+        uses: opentdf/platform/test/start-up-with-containers@11af44a5d4826ed281bf2e0e4e31d6ff6154b393
+        with:
+          platform-ref: ${{ env.PLATFORM_REF }}
+          ec-tdf-enabled: true
+          extra-keys: ${{ steps.load-extra-keys.outputs.EXTRA_KEYS }}
+          log-type: json
+          pqc-enabled: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
+        with:
+          python-version: "3.14"
+
+      - name: Set up Go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+        with:
+          go-version: "1.24.x"
+
+      - name: Set up Node 22
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: "22.x"
+
+      ######## go@main (peer encrypt/decrypt + otdfctl fixtures) #############
+      - name: Capture platform otdfctl location
+        id: platform-otdfctl
+        run: |-
+          if [ -d "$PLATFORM_DIR/otdfctl" ] && [ -f "$PLATFORM_DIR/otdfctl/go.mod" ]; then
+            echo "dir=$(pwd)/$PLATFORM_DIR/otdfctl" >> "$GITHUB_OUTPUT"
+            sha=$(git -C "$PLATFORM_DIR" rev-parse HEAD)
+            echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          else
+            echo "dir=" >> "$GITHUB_OUTPUT"
+            echo "sha=" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          PLATFORM_DIR: ${{ steps.run-platform.outputs.platform-working-dir }}
+
+      - name: Resolve go@main
+        id: resolve-go
+        working-directory: otdftests
+        run: |-
+          INFO=$(uv run --project otdf-sdk-mgr otdf-sdk-mgr versions resolve go main)
+          echo "version-info=$INFO" >> "$GITHUB_OUTPUT"
+          echo "$INFO" | jq .
+
+      - name: Configure otdfctl (go)
+        id: configure-go
+        uses: ./otdftests/xtest/setup-cli-tool
+        with:
+          path: otdftests/xtest/sdk
+          sdk: go
+          version-info: ${{ steps.resolve-go.outputs.version-info }}
+          platform-otdfctl-dir: ${{ steps.platform-otdfctl.outputs.dir }}
+          platform-otdfctl-sha: ${{ steps.platform-otdfctl.outputs.sha }}
+
+      - name: Build go CLI
+        if: fromJson(steps.configure-go.outputs.heads)[0] != null
+        run: make
+        working-directory: otdftests/xtest/sdk/go
+
+      ######## Community Python SDK #############
+      - name: Checkout python SDK
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: b-long/opentdf-python-sdk
+          ref: ${{ env.PYTHON_REF }}
+          path: otdftests/xtest/sdk/python/src/main
+          persist-credentials: false
+
+      - name: Build python CLI dist
+        run: make VERSIONS=main
+        working-directory: otdftests/xtest/sdk/python
+
+      - name: Probe python supports
+        working-directory: otdftests/xtest
+        run: |-
+          set -e
+          ./sdk/python/dist/main/cli.sh supports autoconfigure
+          ./sdk/python/dist/main/cli.sh supports hexless
+          ! ./sdk/python/dist/main/cli.sh supports ecwrap || { echo "python should not claim ecwrap yet"; exit 1; }
+
+      - name: Platform version
+        id: platform-version
+        working-directory: ${{ steps.run-platform.outputs.platform-working-dir }}
+        run: |-
+          if PLATFORM_VERSION=$(go run ./service version 2>&1); then
+            echo "PLATFORM_VERSION=$PLATFORM_VERSION" >> "$GITHUB_ENV"
+          else
+            echo "PLATFORM_VERSION=main" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install xtest deps
+        run: uv sync
+        working-directory: otdftests/xtest
+
+      - name: Run Stage-1 community tests (python × go)
+        working-directory: otdftests/xtest
+        env:
+          PLATFORM_DIR: "../../${{ steps.run-platform.outputs.platform-working-dir }}"
+          PLATFORM_LOG_FILE: "../../${{ steps.run-platform.outputs.platform-log-file }}"
+          PLATFORM_TAG: main
+          SCHEMA_FILE: "manifest.schema.json"
+          # Stage-1a: python encrypt → go decrypt; Stage-1b: go encrypt → python decrypt
+          # Combined: --sdks-encrypt "python@main go@main" --sdks-decrypt "python@main go@main" --focus python
+        run: |-
+          mkdir -p test-results
+          uv run pytest -n auto --dist loadscope \
+            --html=test-results/community-python-stage1.html \
+            --self-contained-html \
+            --junitxml=test-results/community-python-stage1.junit.xml \
+            --sdks-encrypt "python@main go@main" \
+            --sdks-decrypt "python@main go@main" \
+            --containers ztdf \
+            --focus python \
+            -m stage1 \
+            -ra -v \
+            test_tdfs.py \
+            | tee test-results/community-python-stage1.log
+
+      - name: Export capability snapshot
+        if: success() || failure()
+        working-directory: otdftests/xtest
+        run: |-
+          mkdir -p test-results/report-python-ubuntu-latest
+          uv run python - <<'PY'
+          import json, subprocess, os
+          from pathlib import Path
+          from datetime import datetime, timezone
+
+          features = [
+              "assertions","assertion_verification","attribute_traversal","audit_logging",
+              "autoconfigure","better-messages-2024","bulk_rewrap","connectrpc","dpop",
+              "dpop_nonce_challenge","ecwrap","hexless","hexaflexible","kasallowlist",
+              "key_management","mechanism-rsa-4096","mechanism-ec-curves-384-521",
+              "mechanism-xwing","mechanism-secpmlkem","mechanism-mlkem","ns_grants","obligations",
+          ]
+          cli = Path("sdk/python/dist/main/cli.sh")
+          supports = {}
+          for f in features:
+              try:
+                  r = subprocess.run([str(cli), "supports", f], capture_output=True, timeout=30)
+                  supports[f] = "supported" if r.returncode == 0 else ("unsupported" if r.returncode == 1 else "unknown")
+              except Exception as e:
+                  supports[f] = f"error:{e}"
+
+          out = {
+              "schema_version": 1,
+              "generated_at": datetime.now(timezone.utc).isoformat(),
+              "sdk": "python",
+              "sdk_ref": os.environ.get("PYTHON_REF", "main"),
+              "platform_ref": os.environ.get("PLATFORM_REF", "main"),
+              "tier": "kas-ready",
+              "stage": 1,
+              "supports": supports,
+              "run_id": os.environ.get("GITHUB_RUN_ID"),
+              "repo": os.environ.get("GITHUB_REPOSITORY"),
+          }
+          dest = Path("test-results/report-python-ubuntu-latest")
+          dest.mkdir(parents=True, exist_ok=True)
+          (dest / "supports.json").write_text(json.dumps(out, indent=2))
+          (dest / "meta.json").write_text(json.dumps({
+              "sdk": "python", "os": "ubuntu-latest", "stage": 1,
+              "run_id": os.environ.get("GITHUB_RUN_ID"),
+          }, indent=2))
+          print(json.dumps(out, indent=2))
+          PY
+
+      - name: Upload results
+        if: success() || failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ job.status == 'success' && '✅' || '❌' }} community-python-stage1
+          path: |
+            otdftests/xtest/test-results/**
+
+      - name: Upload server logs on failure
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: community-python-server-logs
+          path: ${{ steps.run-platform.outputs.platform-log-file }}
+          if-no-files-found: ignore
+
+  # Capstone: fail the workflow if community-python failed
+  community-xtest:
+    runs-on: ubuntu-latest
+    needs: community-python
+    if: always()
+    permissions:
+      contents: read
+    steps:
+      - name: Assert community jobs passed
+        if: ${{ needs.community-python.result != 'success' }}
+        run: |
+          echo "community-python result: ${{ needs.community-python.result }}" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+      - name: Success
+        if: ${{ needs.community-python.result == 'success' }}
+        run: echo "Community Stage-1 (python) succeeded." >> "$GITHUB_STEP_SUMMARY"

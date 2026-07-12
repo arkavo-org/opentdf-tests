@@ -25,6 +25,7 @@ except FileNotFoundError:
 #### BASIC ROUNDTRIP TESTS
 
 
+@pytest.mark.stage1
 def test_tdf_roundtrip(
     encrypt_sdk: tdfs.SDK,
     decrypt_sdk: tdfs.SDK,

@@ -98,11 +98,23 @@ def _kas_supports_algorithm(algorithm: str) -> bool:
         return False
 
 
-sdk_type = Literal["go", "java", "js"]
+# Official first-party SDKs (upstream-compatible).
+official_sdk_type = Literal["go", "java", "js"]
+# Community SDKs integrated in the arkavo-org/opentdf-tests fork.
+community_sdk_type = Literal["rust", "swift", "python"]
+# Flat union so get_args(sdk_type) returns all six names.
+sdk_type = Literal["go", "java", "js", "rust", "swift", "python"]
+
+OFFICIAL_SDKS: tuple[str, ...] = ("go", "java", "js")
+COMMUNITY_SDKS: tuple[str, ...] = ("rust", "swift", "python")
 
 
 def is_sdk_type(val: str) -> TypeIs[sdk_type]:
     return val in get_args(sdk_type)
+
+
+def is_community_sdk(val: str) -> bool:
+    return val in COMMUNITY_SDKS
 
 
 focus_type = Literal[sdk_type, "all"]
@@ -582,7 +594,12 @@ class SDK:
         if not verify_assertions:
             local_env |= {"XT_WITH_VERIFY_ASSERTIONS": "false"}
         if kasallowlist:
-            local_env |= {"XT_WITH_KAS_ALLOWLIST": kasallowlist}
+            # Official go/java cli.sh read XT_WITH_KAS_ALLOW_LIST;
+            # community shims accept both spellings.
+            local_env |= {
+                "XT_WITH_KAS_ALLOWLIST": kasallowlist,
+                "XT_WITH_KAS_ALLOW_LIST": kasallowlist,
+            }
         if ignore_kas_allowlist:
             local_env |= {"XT_WITH_IGNORE_KAS_ALLOWLIST": "true"}
         logger.info(f"dec [{' '.join([fmt_env(local_env)] + c)}]")
