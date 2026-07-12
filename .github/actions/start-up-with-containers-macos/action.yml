@@ -300,21 +300,20 @@ runs:
       working-directory: otdf-test-platform
     - name: Spin up platform's containerized resources
       shell: bash
+      env:
+        # Path to this composite action (GitHub sets github.action_path for composites).
+        ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
-        # Keycloak Quarkus cold-start under Colima regularly exceeds the stock
-        # healthcheck start_period (2m) + retries, so the container is marked
-        # unhealthy while still running liquibase. Override for macOS/Colima.
-        # Heredoc body must not be shell-indented (YAML root keys).
-        cat > docker-compose.macos.override.yml <<'YAML'
-services:
-  keycloak:
-    healthcheck:
-      interval: 15s
-      timeout: 15s
-      retries: 40
-      start_period: 10m
-YAML
+        # Keycloak Quarkus cold-start under Colima exceeds stock healthchecks.
+        # Override file lives next to this action.yml (do not inline YAML here —
+        # unindented heredocs break action.yml parsing).
+        OVERRIDE="${ACTION_PATH}/docker-compose.macos.override.yml"
+        if [[ ! -f "$OVERRIDE" ]]; then
+          echo "::error::missing override: $OVERRIDE"
+          exit 1
+        fi
+        cp "$OVERRIDE" docker-compose.macos.override.yml
         export COMPOSE_FILE="docker-compose.yaml:docker-compose.macos.override.yml"
         echo "Using COMPOSE_FILE=$COMPOSE_FILE"
         if ! docker compose up -d --wait --wait-timeout 900; then
