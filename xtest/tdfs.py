@@ -168,6 +168,7 @@ def wire_cli_format(container: container_type) -> str:
         return "ztdf"
     return container
 
+
 feature_type = Literal[
     "assertions",
     "assertion_verification",

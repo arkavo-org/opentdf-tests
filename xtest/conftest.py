@@ -88,6 +88,7 @@ def pytest_addoption(parser: pytest.Parser):
         help="comma-separated list of docker compose services to monitor for audit logs",
         type=lambda s: [s.strip() for s in s.split(",")],
     )
+
     def containers_opt(v: str) -> str:
         """Validate whitespace-separated container profiles (canonical or aliases)."""
         if not v.strip():

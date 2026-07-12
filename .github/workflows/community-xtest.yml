@@ -278,7 +278,7 @@ jobs:
       checks: write
       pull-requests: write
     env:
-      RUST_REF: ${{ inputs.rust-ref || 'feat/xtest-cli-kas-stage1' }}
+      RUST_REF: ${{ inputs.rust-ref || 'main' }}
       PLATFORM_REF: ${{ inputs.platform-ref || 'main' }}
       FOCUS_SDK: rust
     steps:
@@ -411,7 +411,7 @@ jobs:
       checks: write
       pull-requests: write
     env:
-      SWIFT_REF: ${{ inputs.swift-ref || 'feat/cli-kas-stage1' }}
+      SWIFT_REF: ${{ inputs.swift-ref || 'main' }}
       PLATFORM_REF: ${{ inputs.platform-ref || 'main' }}
       FOCUS_SDK: swift
     steps:
