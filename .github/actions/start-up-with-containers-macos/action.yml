@@ -273,6 +273,11 @@ runs:
           ' -i opentdf.yaml || true
         fi
         yq e '(.logger.level = env(LOG_LEVEL)) | (.logger.type = env(LOG_TYPE))' -i opentdf.yaml
+        # Prefer 127.0.0.1 over localhost so Go clients don't hit [::1] while KC is IPv4-only.
+        yq e '
+          (.server.auth.issuer = "http://127.0.0.1:8888/auth/realms/opentdf")
+          | (.services.entityresolution.url = "http://127.0.0.1:8888/auth")
+        ' -i opentdf.yaml
         echo "--- opentdf.yaml kas/auth snippet ---"
         yq e '.services.kas.keyring, .server.auth.issuer, .db' opentdf.yaml || true
 
@@ -301,29 +306,46 @@ runs:
         export KC_FEATURES=preview,token-exchange
         export KC_HEALTH_ENABLED=true
         # Stage-1 uses HTTP IdP URLs in test.env (no container TLS path needed).
+        # Bind HTTP explicitly; prefer 127.0.0.1 for readiness/provision (avoid ::1).
         nohup "$KC_ROOT/bin/kc.sh" start-dev --verbose \
+          --http-enabled=true \
+          --http-port=8888 \
+          --http-host=0.0.0.0 \
+          --http-relative-path=/auth \
+          --hostname-strict=false \
           >"${RUNNER_TEMP}/keycloak.log" 2>&1 &
         echo $! >"${RUNNER_TEMP}/keycloak.pid"
         echo "Keycloak pid=$(cat "${RUNNER_TEMP}/keycloak.pid")"
 
-        echo "Waiting for Keycloak http://127.0.0.1:8888/auth/ ..."
+        # Ready when admin password grant succeeds (what provision keycloak needs).
+        # Do NOT treat curl http_code 000 as success: `curl ... || echo 000` can yield
+        # "000000" (code 000 + fallback 000) and falsely pass `!= 000`.
+        echo "Waiting for Keycloak admin token on http://127.0.0.1:8888/auth/ ..."
         ready=0
-        for i in $(seq 1 90); do
-          code=$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 2 \
-            "http://127.0.0.1:8888/auth/" 2>/dev/null || echo "000")
-          if [[ "$code" != "000" && -n "$code" ]]; then
-            echo "Keycloak ready (HTTP $code) after attempt $i"
+        token_url="http://127.0.0.1:8888/auth/realms/master/protocol/openid-connect/token"
+        for i in $(seq 1 120); do
+          code=$(curl -4 -sS -o /tmp/kc-token.out -w "%{http_code}" --connect-timeout 2 \
+            -X POST "$token_url" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "client_id=admin-cli" \
+            --data-urlencode "username=admin" \
+            --data-urlencode "password=changeme" \
+            --data-urlencode "grant_type=password" 2>/dev/null || true)
+          # Strip non-digits; only a real 3-digit response counts.
+          code=$(echo "$code" | tr -cd '0-9' | tail -c 3)
+          if [[ "$code" == "200" ]] && grep -q access_token /tmp/kc-token.out 2>/dev/null; then
+            echo "Keycloak admin token OK after attempt $i"
             ready=1
             break
           fi
           if (( i % 6 == 0 )); then
-            echo "  still waiting ($i) last=$code"
-            tail -5 "${RUNNER_TEMP}/keycloak.log" || true
+            echo "  still waiting ($i) token_http=$code"
+            tail -8 "${RUNNER_TEMP}/keycloak.log" || true
           fi
           sleep 5
         done
         if [[ "$ready" != "1" ]]; then
-          echo "::error::Keycloak failed to become ready"
+          echo "::error::Keycloak failed to become ready for admin login"
           tail -200 "${RUNNER_TEMP}/keycloak.log" || true
           exit 1
         fi
@@ -331,7 +353,14 @@ runs:
     - name: Provision Keycloak realm / clients
       shell: bash
       working-directory: otdf-test-platform
-      run: go run ./service provision keycloak
+      run: |
+        set -euo pipefail
+        # Force IPv4 loopback — Go's localhost can prefer ::1 and get connection refused
+        # while Keycloak is only (or first) bound for IPv4.
+        go run ./service provision keycloak \
+          --endpoint "http://127.0.0.1:8888/auth" \
+          --username admin \
+          --password changeme
 
     - name: Provision policy fixtures
       if: ${{ inputs.provision-policy-fixtures == 'true' }}
