@@ -396,11 +396,13 @@ jobs:
           name: ${{ job.status == 'success' && '✅' || '❌' }} community-rust-stage1
           path: otdftests/xtest/test-results/**
 
+  # OpenTDFKit needs Apple CryptoKit/Security — stay on macOS (not Linux Swift).
+  # Platform deps use Docker via Colima on macos-latest (same machine as the Swift CLI).
   community-swift:
     name: "swift ↔ go@main stage1"
-    runs-on: macos-14
+    runs-on: macos-latest
     timeout-minutes: 90
-    # macOS GHA + colima/vz is flaky; do not block python/rust Stage-1.
+    # Colima on GHA can still flake; python/rust remain required in the capstone.
     continue-on-error: true
     permissions:
       contents: read
@@ -417,12 +419,18 @@ jobs:
           path: otdftests
           persist-credentials: false
 
-      - name: Install Docker (colima) for platform
+      # Maintained helper: Homebrew docker + Colima/Lima on GitHub-hosted macOS.
+      # Prefer this over ad-hoc brew/colima start (vz failures on some images).
+      - name: Set up Docker on macOS
+        uses: douglascamata/setup-docker-macos-action@v1.1.0
+        with:
+          colima: latest
+
+      - name: Verify Docker
         run: |-
-          brew install docker colima docker-compose lima
-          # qemu is more reliable than vz on some GHA macos images
-          colima start --vm-type=qemu --cpu 3 --memory 6 --disk 40 || colima start --cpu 3 --memory 6 --disk 40
+          docker version
           docker info
+          docker compose version || true
 
       - id: load-extra-keys
         run: echo "EXTRA_KEYS=$(jq -c <otdftests/xtest/extra-keys.json)" >> "${GITHUB_OUTPUT}"
