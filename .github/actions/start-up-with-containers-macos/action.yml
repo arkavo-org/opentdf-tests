@@ -288,15 +288,38 @@ runs:
           ls -la ./keys || true
           exit 1
         fi
-        echo "Trusting $CERT in System keychain for URLSession/curl/go clients"
+        echo "Trusting $CERT in System keychain for Swift URLSession"
         # -d add to admin cert store; -r trustRoot always trust as root
         sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "$CERT"
-        # Export PEM path for Go SDK / tools that honor SSL_CERT_FILE
-        ABS="$(cd "$(dirname "$CERT")" && pwd)/$(basename "$CERT")"
-        echo "SSL_CERT_FILE=$ABS" >> "$GITHUB_ENV"
-        echo "NODE_EXTRA_CA_CERTS=$ABS" >> "$GITHUB_ENV"
-        # Quick sanity: openssl should accept the trust path
-        security find-certificate -a -c localhost /Library/Keychains/System.keychain | head -5 || true
+
+        # Go/curl/uv use SSL_CERT_FILE as a *replacement* bundle, not an additive
+        # trust store. Point it at system roots + platform cert so PyPI still works.
+        COMBINED="$(pwd)/keys/ca-bundle-with-platform.pem"
+        : > "$COMBINED"
+        for roots in \
+          /etc/ssl/cert.pem \
+          /private/etc/ssl/cert.pem \
+          /etc/ssl/certs/ca-certificates.crt
+        do
+          if [[ -f "$roots" ]]; then
+            cat "$roots" >> "$COMBINED"
+            break
+          fi
+        done
+        # Always export macOS system roots (covers missing /etc/ssl/cert.pem).
+        security find-certificate -a -p \
+          /System/Library/Keychains/SystemRootCertificates.keychain \
+          >> "$COMBINED" 2>/dev/null || true
+        security find-certificate -a -p \
+          /Library/Keychains/System.keychain \
+          >> "$COMBINED" 2>/dev/null || true
+        cat "$CERT" >> "$COMBINED"
+        ABS_COMBINED="$(cd "$(dirname "$COMBINED")" && pwd)/$(basename "$COMBINED")"
+        ABS_CERT="$(cd "$(dirname "$CERT")" && pwd)/$(basename "$CERT")"
+        echo "SSL_CERT_FILE=$ABS_COMBINED" >> "$GITHUB_ENV"
+        # Node treats this as *extra* CAs (safe for public HTTPS).
+        echo "NODE_EXTRA_CA_CERTS=$ABS_CERT" >> "$GITHUB_ENV"
+        echo "Combined CA bundle: $ABS_COMBINED ($(wc -c < "$COMBINED") bytes)"
       working-directory: otdf-test-platform
     - name: Spin up platform's containerized resources
       shell: bash
