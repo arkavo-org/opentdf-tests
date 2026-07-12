@@ -112,7 +112,7 @@ def generate(input_dir: Path, output_dir: Path) -> None:
 </head>
 <body>
   <h1>OpenTDF Community SDK Conformance</h1>
-  <p class="meta">Generated {generated}. Stage-1 = community ↔ go@main, ztdf only.</p>
+  <p class="meta">Generated {generated}. Stage-1 = community ↔ go@main, Base TDF (<code>tdf</code>) only.</p>
 
   <h2>Interop summary (junit)</h2>
   <table>

@@ -1,6 +1,7 @@
 # Community SDK cross-tests (fork of opentdf/tests).
 #
-# Stage-1 (this workflow): community SDK ↔ go@main, ztdf only, -m stage1.
+# Stage-1 (this workflow): community SDK ↔ go@main, Base TDF (tdf) only, -m stage1.
+# (Not NATO ZTDF; not NanoTDF. See docs/FORMATS.md.)
 # Enabled: python (ubuntu), rust (ubuntu), swift (macos + colima/docker).
 # No nanoTDF in Stage-1.
 #
@@ -196,7 +197,7 @@ jobs:
             --junitxml=test-results/community-python-stage1.junit.xml \
             --sdks-encrypt "python@main go@main" \
             --sdks-decrypt "python@main go@main" \
-            --containers ztdf \
+            --containers tdf \
             --focus python \
             -m stage1 \
             -ra -v \
@@ -384,7 +385,7 @@ jobs:
             --junitxml=test-results/community-rust-stage1.junit.xml \
             --sdks-encrypt "rust@main go@main" \
             --sdks-decrypt "rust@main go@main" \
-            --containers ztdf \
+            --containers tdf \
             --focus rust \
             -m stage1 \
             -ra -v \
@@ -498,7 +499,7 @@ jobs:
       - name: Probe swift supports
         working-directory: otdftests/xtest
         run: |-
-          ./sdk/swift/dist/main/cli.sh supports ztdf
+          ./sdk/swift/dist/main/cli.sh supports tdf || ./sdk/swift/dist/main/cli.sh supports ztdf
           ./sdk/swift/dist/main/cli.sh supports hexless
           ! ./sdk/swift/dist/main/cli.sh supports ecwrap || exit 1
 
@@ -529,7 +530,7 @@ jobs:
             --junitxml=test-results/community-swift-stage1.junit.xml \
             --sdks-encrypt "swift@main go@main" \
             --sdks-decrypt "swift@main go@main" \
-            --containers ztdf \
+            --containers tdf \
             --focus swift \
             -m stage1 \
             -ra -v \

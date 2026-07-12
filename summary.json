@@ -2,7 +2,8 @@
   "schema_version": 1,
   "generated_at": "bootstrap",
   "stage": 1,
-  "container": "ztdf",
+  "container": "tdf",
+  "format_profile": "base-tdf",
   "peer": "go@main",
   "reports": [],
   "note": "Populated by community-xtest / pages publish job"

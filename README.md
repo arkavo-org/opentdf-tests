@@ -13,7 +13,7 @@ See [docs/community-conformance.md](docs/community-conformance.md) and the desig
 | Workflow | Purpose |
 |----------|---------|
 | `xtest.yml` | Official go / java / js matrix (unchanged core) |
-| `community-xtest.yml` | Community python ↔ go@main Stage-1 (ztdf) |
+| `community-xtest.yml` | Community python ↔ go@main Stage-1 (tdf) |
 
 ## [Vulnerability](vulnerability)
 

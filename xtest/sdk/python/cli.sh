@@ -125,12 +125,12 @@ if [[ "${XT_WITH_IGNORE_KAS_ALLOWLIST:-}" == "true" ]]; then
   parent_args+=(--ignore-kas-allowlist)
 fi
 
-# Only ztdf (and ztdf-ecwrap, mapped by harness) for Stage-1.
+# Base TDF only for Stage-1 (wire token may still be legacy "ztdf" from harness).
 case "$fmt" in
-  ztdf | tdf)
+  tdf | base-tdf | ztdf)
     container_type=tdf
     ;;
-  ztdf-ecwrap)
+  tdf-ecwrap | ztdf-ecwrap)
     echo "ecwrap not supported by python community shim" >&2
     exit 1
     ;;

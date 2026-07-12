@@ -4,8 +4,8 @@ The cross-client integration test suite. pytest with custom options that
 fan out tests across SDK CLIs (`go`, `java`, `js`, plus community
 `python` / `rust` / `swift`) and TDF container types.
 
-Community Stage-1 uses `@pytest.mark.stage1` on basic ztdf roundtrip
-only — see `../docs/community-conformance.md`.
+Community Stage-1 uses `@pytest.mark.stage1` on basic **Base TDF** (`tdf`)
+roundtrip only — see `../docs/community-conformance.md` and `../docs/FORMATS.md`.
 
 For env-variable setup, audit-log details, and common-failure recipes,
 see the root `AGENTS.md`. This guide focuses on test authoring and the
@@ -29,7 +29,7 @@ fixture system.
 |--------|---------|
 | `--sdks "go java js"` | Which SDKs to use for both encrypt and decrypt. |
 | `--sdks-encrypt`, `--sdks-decrypt` | Asymmetric encrypt/decrypt SDK selection (use when reproducing cross-SDK interop bugs). |
-| `--containers ztdf ztdf-ecwrap` | Which TDF container types to exercise. |
+| `--containers tdf tdf-ecwrap` | Which format profiles to exercise (Base TDF; aliases: `ztdf`→`tdf`). See `docs/FORMATS.md`. |
 | `--no-audit-logs` | Skip audit-log assertions for this run. CLI equivalent of `DISABLE_AUDIT_ASSERTIONS=1`. |
 
 ## Authoring a New Test

@@ -119,10 +119,54 @@ def is_community_sdk(val: str) -> bool:
 
 focus_type = Literal[sdk_type, "all"]
 
+# Canonical container *profile* slugs (OpenTDF / Virtru terminology).
+# See docs/FORMATS.md.
+#
+# - tdf:          Base TDF / Standard TDF (ZIP + JSON manifest + encrypted payload)
+# - tdf-ecwrap:   Base TDF with EC key wrapping
+# - ztdf:         Reserved for the NATO STANAG Zero Trust Data Format profile
+#                 (not the same as Base TDF; not yet a Stage-1 matrix cell)
+# - nanotdf:      NanoTDF (binary; not Stage-1)
 container_type = Literal[
-    "ztdf",
-    "ztdf-ecwrap",
+    "tdf",
+    "tdf-ecwrap",
 ]
+
+# Aliases accepted on CLI / configs; normalized to container_type.
+# "ztdf" was historically misused in OpenTDF tooling for Base TDF ZIP format.
+CONTAINER_ALIASES: dict[str, container_type] = {
+    "tdf": "tdf",
+    "base-tdf": "tdf",
+    "standard-tdf": "tdf",
+    "ztdf": "tdf",  # legacy alias → Base TDF (not NATO ZTDF profile)
+    "tdf-ecwrap": "tdf-ecwrap",
+    "base-tdf-ecwrap": "tdf-ecwrap",
+    "ztdf-ecwrap": "tdf-ecwrap",  # legacy alias
+}
+
+
+def normalize_container(name: str) -> container_type:
+    """Map alias or canonical name to a container_type; raise ValueError if unknown."""
+    key = name.strip().lower()
+    if key in CONTAINER_ALIASES:
+        return CONTAINER_ALIASES[key]
+    raise ValueError(
+        f"Unknown container profile {name!r}. "
+        f"Use one of: {', '.join(sorted(set(CONTAINER_ALIASES.values())))} "
+        f"(aliases: {', '.join(sorted(CONTAINER_ALIASES))}). "
+        f"Note: 'ztdf' is a legacy alias for Base TDF; true NATO ZTDF is not yet tested."
+    )
+
+
+def wire_cli_format(container: container_type) -> str:
+    """Format token passed as the 4th argument to official sdk/*/cli.sh.
+
+    Historical go/java/js shims expect the string ``ztdf`` for Base TDF ZIP
+    containers. Community shims accept ``tdf`` and ``ztdf`` as synonyms.
+    """
+    if container in ("tdf", "tdf-ecwrap"):
+        return "ztdf"
+    return container
 
 feature_type = Literal[
     "assertions",
@@ -475,10 +519,9 @@ def fmt_env(env: dict[str, str]) -> str:
     return " ".join(a)
 
 
-def simple_container(container: container_type) -> container_type:
-    if container == "ztdf-ecwrap":
-        return "ztdf"
-    return container
+def simple_container(container: container_type) -> str:
+    """Reduce profile to the wire format for cli.sh (Base TDF → legacy 'ztdf')."""
+    return wire_cli_format(container)
 
 
 class SDK:
@@ -520,13 +563,13 @@ class SDK:
         pt_file: Path,
         ct_file: Path,
         mime_type: str = "application/octet-stream",
-        container: container_type = "ztdf",
+        container: container_type = "tdf",
         attr_values: list[str] | None = None,
         assert_value: str = "",
         policy_mode: str = "encrypted",
         target_mode: container_version | None = None,
     ):
-        use_ecwrap = container == "ztdf-ecwrap"
+        use_ecwrap = container == "tdf-ecwrap"
         fmt = simple_container(container)
         c = [
             self.path,
@@ -546,7 +589,7 @@ class SDK:
         if assert_value:
             local_env |= {"XT_WITH_ASSERTIONS": assert_value}
 
-        if fmt == "ztdf" and target_mode:
+        if container in ("tdf", "tdf-ecwrap") and target_mode:
             local_env |= {"XT_WITH_TARGET_MODE": target_mode}
 
         if use_ecwrap:
@@ -568,7 +611,7 @@ class SDK:
         self,
         ct_file: Path,
         rt_file: Path,
-        container: container_type = "ztdf",
+        container: container_type = "tdf",
         assert_keys: str = "",
         verify_assertions: bool = True,
         ecwrap: bool = False,

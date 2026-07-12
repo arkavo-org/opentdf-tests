@@ -4,11 +4,12 @@ This fork (`arkavo-org/opentdf-tests`) extends official OpenTDF `xtest` with **c
 
 | SDK | Repo | Stage-1 status |
 |-----|------|----------------|
-| **Python** | [b-long/opentdf-python-sdk](https://github.com/b-long/opentdf-python-sdk) | **Enabled** — ubuntu, python ↔ go@main, ztdf |
+| **Python** | [b-long/opentdf-python-sdk](https://github.com/b-long/opentdf-python-sdk) | **Enabled** — ubuntu, python ↔ go@main, Base TDF |
 | **Rust** | [arkavo-org/opentdf-rs](https://github.com/arkavo-org/opentdf-rs) | **Enabled** — ubuntu, RSA wrap + KasClient rewrap |
 | **Swift** | [arkavo-org/OpenTDFKit](https://github.com/arkavo-org/OpenTDFKit) | **Enabled** — `macos-latest` + Colima Docker for platform (CryptoKit; not Linux) |
 
-Full design: [community-xtest-design.md](./community-xtest-design.md).
+Full design: [community-xtest-design.md](./community-xtest-design.md).  
+**Format naming:** [FORMATS.md](./FORMATS.md) (Base TDF vs ZTDF vs NanoTDF).
 
 ## What Stage-1 proves
 
@@ -16,7 +17,7 @@ For each **kas-ready** community SDK:
 
 1. **Community encrypt → Go decrypt** (interop)
 2. **Go encrypt → Community decrypt** (interop)
-3. Container: **ztdf only** (no nanoTDF, no ABAC/PQC matrix in Stage-1)
+3. Container: **Base TDF (`tdf`) only** — not NATO ZTDF, not NanoTDF, not full ABAC/PQC
 4. Feature honesty: `cli.sh supports <feature>` must not advertise features that fail tests
 
 ## Local setup (Python)
@@ -38,7 +39,7 @@ make -C xtest/sdk/python VERSIONS=main
 cd xtest
 uv sync
 set -a && source test.env && set +a
-uv run pytest -m stage1 --containers ztdf \
+uv run pytest -m stage1 --containers tdf \
   --sdks-encrypt "python@main go@main" \
   --sdks-decrypt "python@main go@main" \
   --focus python \
@@ -51,9 +52,9 @@ Workflow: `.github/workflows/community-xtest.yml`
 
 - Runs on PRs that touch xtest / otdf-sdk-mgr / the workflow
 - Spins up platform via `opentdf/platform` composite action
-- Builds go@main + python@main CLIs
+- Builds go@main + community CLI(s)
 - Publishes HTML + junit + `supports.json` artifacts
-- GitHub Pages capability matrix (PR7 in the design) lands after the green path is stable
+- Human report: https://arkavo-org.github.io/opentdf-tests/ (branch Pages)
 
 ## Badge ownership
 
@@ -65,6 +66,5 @@ Workflow: `.github/workflows/community-xtest.yml`
 ## Offline probes (Rust / Swift)
 
 ```bash
-XT_ALLOW_OFFLINE=1 ./sdk/rust/dist/main/cli.sh supports tdf   # local only
-# Stage-1 matrix will not run rust/swift until XT_*_KAS_READY=1 after SDK work
+./sdk/rust/dist/main/cli.sh supports tdf   # or legacy: supports ztdf
 ```
