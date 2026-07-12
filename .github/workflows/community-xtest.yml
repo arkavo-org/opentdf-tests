@@ -1,8 +1,8 @@
 # Community SDK cross-tests (fork of opentdf/tests).
 #
 # Stage-1 (this workflow): community SDK ↔ go@main, ztdf only, -m stage1.
-# Currently enabled: python (kas-ready).
-# Swift/Rust: offline until their KAS/OAuth CLI work lands (see docs/community-xtest-design.md).
+# Enabled: python (ubuntu), rust (ubuntu), swift (macos + colima/docker).
+# No nanoTDF in Stage-1.
 #
 # Does NOT expand the official xtest.yml matrix.
 name: Community X-Test
@@ -23,6 +23,16 @@ on:
         type: string
         default: main
         description: "opentdf-python-sdk ref (branch, tag, or SHA)"
+      rust-ref:
+        required: false
+        type: string
+        default: main
+        description: "opentdf-rs ref"
+      swift-ref:
+        required: false
+        type: string
+        default: main
+        description: "OpenTDFKit ref"
       platform-ref:
         required: false
         type: string
@@ -33,11 +43,6 @@ on:
         type: string
         default: main
         description: "otdfctl / go SDK ref for peer + attribute fixtures"
-      focus:
-        required: false
-        type: string
-        default: python
-        description: "community SDK focus (python only for Stage-1)"
 
 concurrency:
   group: community-xtest-${{ github.event.pull_request.number || github.ref }}
@@ -60,7 +65,7 @@ jobs:
       PYTHON_REF: ${{ inputs.python-ref || 'main' }}
       PLATFORM_REF: ${{ inputs.platform-ref || 'main' }}
       OTDFCTL_REF: ${{ inputs.otdfctl-ref || 'main' }}
-      FOCUS_SDK: ${{ inputs.focus || 'python' }}
+      FOCUS_SDK: python
 
     steps:
       - name: Checkout tests fork
@@ -262,19 +267,284 @@ jobs:
           path: ${{ steps.run-platform.outputs.platform-log-file }}
           if-no-files-found: ignore
 
-  # Capstone: fail the workflow if community-python failed
+  community-rust:
+    name: "rust ↔ go@main stage1"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: read
+      checks: write
+      pull-requests: write
+    env:
+      RUST_REF: ${{ inputs.rust-ref || 'feat/xtest-cli-kas-stage1' }}
+      PLATFORM_REF: ${{ inputs.platform-ref || 'main' }}
+      FOCUS_SDK: rust
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: otdftests
+          persist-credentials: false
+
+      - id: load-extra-keys
+        run: echo "EXTRA_KEYS=$(jq -c <otdftests/xtest/extra-keys.json)" >> "${GITHUB_OUTPUT}"
+
+      - id: run-platform
+        uses: opentdf/platform/test/start-up-with-containers@11af44a5d4826ed281bf2e0e4e31d6ff6154b393
+        with:
+          platform-ref: ${{ env.PLATFORM_REF }}
+          ec-tdf-enabled: true
+          extra-keys: ${{ steps.load-extra-keys.outputs.EXTRA_KEYS }}
+          log-type: json
+          pqc-enabled: true
+
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
+        with:
+          python-version: "3.14"
+      - uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+        with:
+          go-version: "1.24.x"
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Capture platform otdfctl location
+        id: platform-otdfctl
+        run: |-
+          if [ -d "$PLATFORM_DIR/otdfctl" ] && [ -f "$PLATFORM_DIR/otdfctl/go.mod" ]; then
+            echo "dir=$(pwd)/$PLATFORM_DIR/otdfctl" >> "$GITHUB_OUTPUT"
+            echo "sha=$(git -C "$PLATFORM_DIR" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          else
+            echo "dir=" >> "$GITHUB_OUTPUT"
+            echo "sha=" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          PLATFORM_DIR: ${{ steps.run-platform.outputs.platform-working-dir }}
+
+      - id: resolve-go
+        working-directory: otdftests
+        run: |-
+          INFO=$(uv run --project otdf-sdk-mgr otdf-sdk-mgr versions resolve go main)
+          echo "version-info=$INFO" >> "$GITHUB_OUTPUT"
+
+      - id: configure-go
+        uses: ./otdftests/xtest/setup-cli-tool
+        with:
+          path: otdftests/xtest/sdk
+          sdk: go
+          version-info: ${{ steps.resolve-go.outputs.version-info }}
+          platform-otdfctl-dir: ${{ steps.platform-otdfctl.outputs.dir }}
+          platform-otdfctl-sha: ${{ steps.platform-otdfctl.outputs.sha }}
+
+      - if: fromJson(steps.configure-go.outputs.heads)[0] != null
+        run: make
+        working-directory: otdftests/xtest/sdk/go
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: arkavo-org/opentdf-rs
+          ref: ${{ env.RUST_REF }}
+          path: otdftests/xtest/sdk/rust/src/main
+          persist-credentials: false
+
+      - name: Build rust CLI
+        run: make VERSIONS=main
+        working-directory: otdftests/xtest/sdk/rust
+
+      - name: Probe rust supports
+        working-directory: otdftests/xtest
+        run: |-
+          ./sdk/rust/dist/main/cli.sh supports hexless
+          ./sdk/rust/dist/main/cli.sh supports connectrpc
+          ! ./sdk/rust/dist/main/cli.sh supports ecwrap || exit 1
+
+      - name: Platform version
+        working-directory: ${{ steps.run-platform.outputs.platform-working-dir }}
+        run: |-
+          if PLATFORM_VERSION=$(go run ./service version 2>&1); then
+            echo "PLATFORM_VERSION=$PLATFORM_VERSION" >> "$GITHUB_ENV"
+          else
+            echo "PLATFORM_VERSION=main" >> "$GITHUB_ENV"
+          fi
+
+      - run: uv sync
+        working-directory: otdftests/xtest
+
+      - name: Run Stage-1 community tests (rust × go)
+        working-directory: otdftests/xtest
+        env:
+          PLATFORM_DIR: "../../${{ steps.run-platform.outputs.platform-working-dir }}"
+          PLATFORM_LOG_FILE: "../../${{ steps.run-platform.outputs.platform-log-file }}"
+          PLATFORM_TAG: main
+          SCHEMA_FILE: "manifest.schema.json"
+        run: |-
+          mkdir -p test-results
+          uv run pytest -n auto --dist loadscope \
+            --html=test-results/community-rust-stage1.html \
+            --self-contained-html \
+            --junitxml=test-results/community-rust-stage1.junit.xml \
+            --sdks-encrypt "rust@main go@main" \
+            --sdks-decrypt "rust@main go@main" \
+            --containers ztdf \
+            --focus rust \
+            -m stage1 \
+            -ra -v \
+            test_tdfs.py
+
+      - if: success() || failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ job.status == 'success' && '✅' || '❌' }} community-rust-stage1
+          path: otdftests/xtest/test-results/**
+
+  community-swift:
+    name: "swift ↔ go@main stage1"
+    runs-on: macos-14
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: read
+      checks: write
+      pull-requests: write
+    env:
+      SWIFT_REF: ${{ inputs.swift-ref || 'feat/cli-kas-stage1' }}
+      PLATFORM_REF: ${{ inputs.platform-ref || 'main' }}
+      FOCUS_SDK: swift
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: otdftests
+          persist-credentials: false
+
+      - name: Install Docker (colima) for platform
+        run: |-
+          brew install docker colima docker-compose
+          colima start --cpu 3 --memory 8 --disk 40
+          docker info
+
+      - id: load-extra-keys
+        run: echo "EXTRA_KEYS=$(jq -c <otdftests/xtest/extra-keys.json)" >> "${GITHUB_OUTPUT}"
+
+      - id: run-platform
+        uses: opentdf/platform/test/start-up-with-containers@11af44a5d4826ed281bf2e0e4e31d6ff6154b393
+        with:
+          platform-ref: ${{ env.PLATFORM_REF }}
+          ec-tdf-enabled: true
+          extra-keys: ${{ steps.load-extra-keys.outputs.EXTRA_KEYS }}
+          log-type: json
+          pqc-enabled: true
+
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
+        with:
+          python-version: "3.14"
+      - uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+        with:
+          go-version: "1.24.x"
+
+      - name: Capture platform otdfctl location
+        id: platform-otdfctl
+        run: |-
+          if [ -d "$PLATFORM_DIR/otdfctl" ] && [ -f "$PLATFORM_DIR/otdfctl/go.mod" ]; then
+            echo "dir=$(pwd)/$PLATFORM_DIR/otdfctl" >> "$GITHUB_OUTPUT"
+            echo "sha=$(git -C "$PLATFORM_DIR" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          else
+            echo "dir=" >> "$GITHUB_OUTPUT"
+            echo "sha=" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          PLATFORM_DIR: ${{ steps.run-platform.outputs.platform-working-dir }}
+
+      - id: resolve-go
+        working-directory: otdftests
+        run: |-
+          INFO=$(uv run --project otdf-sdk-mgr otdf-sdk-mgr versions resolve go main)
+          echo "version-info=$INFO" >> "$GITHUB_OUTPUT"
+
+      - id: configure-go
+        uses: ./otdftests/xtest/setup-cli-tool
+        with:
+          path: otdftests/xtest/sdk
+          sdk: go
+          version-info: ${{ steps.resolve-go.outputs.version-info }}
+          platform-otdfctl-dir: ${{ steps.platform-otdfctl.outputs.dir }}
+          platform-otdfctl-sha: ${{ steps.platform-otdfctl.outputs.sha }}
+
+      - if: fromJson(steps.configure-go.outputs.heads)[0] != null
+        run: make
+        working-directory: otdftests/xtest/sdk/go
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: arkavo-org/OpenTDFKit
+          ref: ${{ env.SWIFT_REF }}
+          path: otdftests/xtest/sdk/swift/src/main
+          persist-credentials: false
+
+      - name: Build swift CLI
+        run: make VERSIONS=main
+        working-directory: otdftests/xtest/sdk/swift
+
+      - name: Probe swift supports
+        working-directory: otdftests/xtest
+        run: |-
+          ./sdk/swift/dist/main/cli.sh supports ztdf
+          ./sdk/swift/dist/main/cli.sh supports hexless
+          ! ./sdk/swift/dist/main/cli.sh supports ecwrap || exit 1
+
+      - name: Platform version
+        working-directory: ${{ steps.run-platform.outputs.platform-working-dir }}
+        run: |-
+          if PLATFORM_VERSION=$(go run ./service version 2>&1); then
+            echo "PLATFORM_VERSION=$PLATFORM_VERSION" >> "$GITHUB_ENV"
+          else
+            echo "PLATFORM_VERSION=main" >> "$GITHUB_ENV"
+          fi
+
+      - run: uv sync
+        working-directory: otdftests/xtest
+
+      - name: Run Stage-1 community tests (swift × go)
+        working-directory: otdftests/xtest
+        env:
+          PLATFORM_DIR: "../../${{ steps.run-platform.outputs.platform-working-dir }}"
+          PLATFORM_LOG_FILE: "../../${{ steps.run-platform.outputs.platform-log-file }}"
+          PLATFORM_TAG: main
+          SCHEMA_FILE: "manifest.schema.json"
+        run: |-
+          mkdir -p test-results
+          uv run pytest -n auto --dist loadscope \
+            --html=test-results/community-swift-stage1.html \
+            --self-contained-html \
+            --junitxml=test-results/community-swift-stage1.junit.xml \
+            --sdks-encrypt "swift@main go@main" \
+            --sdks-decrypt "swift@main go@main" \
+            --containers ztdf \
+            --focus swift \
+            -m stage1 \
+            -ra -v \
+            test_tdfs.py
+
+      - if: success() || failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ job.status == 'success' && '✅' || '❌' }} community-swift-stage1
+          path: otdftests/xtest/test-results/**
+
+  # Capstone: fail if any community Stage-1 job failed
   community-xtest:
     runs-on: ubuntu-latest
-    needs: community-python
+    needs: [community-python, community-rust, community-swift]
     if: always()
     permissions:
       contents: read
     steps:
       - name: Assert community jobs passed
-        if: ${{ needs.community-python.result != 'success' }}
+        if: ${{ needs.community-python.result != 'success' || needs.community-rust.result != 'success' || needs.community-swift.result != 'success' }}
         run: |
-          echo "community-python result: ${{ needs.community-python.result }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "python=${{ needs.community-python.result }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "rust=${{ needs.community-rust.result }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "swift=${{ needs.community-swift.result }}" >> "$GITHUB_STEP_SUMMARY"
           exit 1
       - name: Success
-        if: ${{ needs.community-python.result == 'success' }}
-        run: echo "Community Stage-1 (python) succeeded." >> "$GITHUB_STEP_SUMMARY"
+        if: ${{ needs.community-python.result == 'success' && needs.community-rust.result == 'success' && needs.community-swift.result == 'success' }}
+        run: echo "Community Stage-1 (python + rust + swift) succeeded." >> "$GITHUB_STEP_SUMMARY"

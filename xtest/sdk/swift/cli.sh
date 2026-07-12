@@ -27,37 +27,8 @@ if [[ -z "$BIN" ]]; then
 fi
 
 if [[ "${1:-}" == "supports" ]]; then
-  feature="${2:-}"
-  # Until PR10a lands, do not advertise KAS interop features.
-  if [[ "${XT_SWIFT_KAS_READY:-}" == "1" ]]; then
-    exec "$BIN" supports "$feature"
-  fi
-  case "$feature" in
-    # Formats may be present offline; official feature_type stays false.
-    nano | ztdf | tdf | json | cbor)
-      if [[ "${XT_ALLOW_OFFLINE:-}" == "1" ]]; then
-        exit 0
-      fi
-      exit 1
-      ;;
-    assertions | assertion_verification | attribute_traversal | audit_logging | \
-      autoconfigure | better-messages-2024 | bulk_rewrap | connectrpc | dpop | \
-      dpop_nonce_challenge | ecwrap | hexless | hexaflexible | kasallowlist | \
-      key_management | mechanism-rsa-4096 | mechanism-ec-curves-384-521 | \
-      mechanism-xwing | mechanism-secpmlkem | mechanism-mlkem | ns_grants | obligations)
-      exit 1
-      ;;
-    *)
-      echo "Unknown feature: $feature" >&2
-      exit 2
-      ;;
-  esac
-fi
-
-if [[ "${XT_ALLOW_OFFLINE:-}" != "1" && "${XT_SWIFT_KAS_READY:-}" != "1" ]]; then
-  echo "OpenTDFKitCLI ztdf is offline-style (PEM/symmetric/token file) until KAS/OAuth Stage-1 work lands." >&2
-  echo "Set XT_ALLOW_OFFLINE=1 for offline probes, or XT_SWIFT_KAS_READY=1 after PR10a." >&2
-  exit 1
+  # Delegate to OpenTDFKitCLI (Stage-1 KAS path is live).
+  exec "$BIN" supports "${2:-}"
 fi
 
 XTEST_DIR="$SCRIPT_DIR"
@@ -79,4 +50,5 @@ if [[ -z "${XT_WITH_KAS_ALLOW_LIST:-}" && -n "${XT_WITH_KAS_ALLOWLIST:-}" ]]; th
   export XT_WITH_KAS_ALLOW_LIST="$XT_WITH_KAS_ALLOWLIST"
 fi
 
+# Stage-1 KAS path: CLIENTID/CLIENTSECRET/PLATFORMURL/KASURL used by OpenTDFKitCLI.
 exec "$BIN" "$@"

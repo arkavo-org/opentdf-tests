@@ -4,9 +4,9 @@ This fork (`arkavo-org/opentdf-tests`) extends official OpenTDF `xtest` with **c
 
 | SDK | Repo | Stage-1 status |
 |-----|------|----------------|
-| **Python** | [b-long/opentdf-python-sdk](https://github.com/b-long/opentdf-python-sdk) | **Enabled** — `community-xtest.yml` (python ↔ go@main, ztdf) |
-| **Swift** | [arkavo-org/OpenTDFKit](https://github.com/arkavo-org/OpenTDFKit) | Offline until OpenTDFKitCLI does OAuth + RSA KAS wrap/rewrap |
-| **Rust** | [arkavo-org/opentdf-rs](https://github.com/arkavo-org/opentdf-rs) | Offline until `xtest_cli` does KAS wrap encrypt + rewrap decrypt |
+| **Python** | [b-long/opentdf-python-sdk](https://github.com/b-long/opentdf-python-sdk) | **Enabled** — ubuntu, python ↔ go@main, ztdf |
+| **Rust** | [arkavo-org/opentdf-rs](https://github.com/arkavo-org/opentdf-rs) | **Enabled** — ubuntu, RSA wrap + KasClient rewrap |
+| **Swift** | [arkavo-org/OpenTDFKit](https://github.com/arkavo-org/OpenTDFKit) | **Enabled** — macos-14 + colima, OAuth + RSA wrap + ephemeral rewrap |
 
 Full design: [community-xtest-design.md](./community-xtest-design.md).
 
@@ -16,7 +16,7 @@ For each **kas-ready** community SDK:
 
 1. **Community encrypt → Go decrypt** (interop)
 2. **Go encrypt → Community decrypt** (interop)
-3. Container: **ztdf** only (not full ABAC/PQC matrix)
+3. Container: **ztdf only** (no nanoTDF, no ABAC/PQC matrix in Stage-1)
 4. Feature honesty: `cli.sh supports <feature>` must not advertise features that fail tests
 
 ## Local setup (Python)

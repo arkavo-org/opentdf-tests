@@ -28,39 +28,8 @@ if [[ -z "$BIN" ]]; then
 fi
 
 if [[ "${1:-}" == "supports" ]]; then
-  feature="${2:-}"
-  # Official feature_type names: report honest unsupported until R1/R2 land.
-  # Format names are not official feature_type probes from tdfs.py but may be used offline.
-  case "$feature" in
-    tdf | ztdf | zip | json | cbor | aes-256-gcm)
-      if [[ "${XT_ALLOW_OFFLINE:-}" == "1" ]]; then
-        exit 0
-      fi
-      # Offline format support only — not KAS interop.
-      exit 1
-      ;;
-    kas-rewrap | kas_rewrap)
-      # Must stay false until ZIP encrypt wraps with KAS PublicKey + rewrap decrypt works.
-      exit 1
-      ;;
-    assertions | assertion_verification | attribute_traversal | audit_logging | \
-      autoconfigure | better-messages-2024 | bulk_rewrap | connectrpc | dpop | \
-      dpop_nonce_challenge | ecwrap | hexless | hexaflexible | kasallowlist | \
-      key_management | mechanism-rsa-4096 | mechanism-ec-curves-384-521 | \
-      mechanism-xwing | mechanism-secpmlkem | mechanism-mlkem | ns_grants | obligations)
-      exit 1
-      ;;
-    *)
-      echo "Unknown feature: $feature" >&2
-      exit 2
-      ;;
-  esac
-fi
-
-if [[ "${XT_ALLOW_OFFLINE:-}" != "1" && "${XT_RUST_KAS_READY:-}" != "1" ]]; then
-  echo "opentdf-rs xtest_cli is offline-only until KAS wrap/rewrap lands." >&2
-  echo "Set XT_ALLOW_OFFLINE=1 for local offline probes, or XT_RUST_KAS_READY=1 after R1+R2." >&2
-  exit 1
+  # Delegate to binary (honest Stage-1 feature map).
+  exec "$BIN" supports "${2:-}"
 fi
 
 XTEST_DIR="$SCRIPT_DIR"
@@ -77,7 +46,10 @@ if [[ -f "$XTEST_DIR/test.env" ]]; then
   set +a
 fi
 
-# Map official env into rust offline vars when present.
+# Map official env into rust vars when present.
 export TDF_KAS_URL="${TDF_KAS_URL:-${KASURL:-http://localhost:8080/kas}}"
+export KASURL="${KASURL:-$TDF_KAS_URL}"
 
+# Stage-1 KAS path is live (RSA wrap + client_credentials rewrap).
+# Offline-only mode still available via TDF_SYMMETRIC_KEY_PATH / TDF_KAS_PUBLIC_KEY_PATH.
 exec "$BIN" "$@"
