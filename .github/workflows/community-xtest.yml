@@ -48,8 +48,11 @@ on:
         default: main
         description: "otdfctl / go SDK ref for peer + attribute fixtures"
 
+# One run per branch: push + PR + workflow_dispatch share the same group so a
+# new commit cancels both the prior push run and the prior PR run (avoids
+# double macos/ubuntu spend when the branch has an open PR).
 concurrency:
-  group: community-xtest-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
