@@ -423,10 +423,12 @@ jobs:
           persist-credentials: false
 
       # Homebrew docker + Colima/Lima. Supported on macos-15-intel (x86_64).
+      # Keycloak + Postgres need more than Colima's tiny defaults or healthchecks time out.
       - name: Set up Docker on macOS
         uses: douglascamata/setup-docker-macos-action@v1.1.0
         with:
           colima: latest
+          colima-additional-options: "--cpu 4 --memory 8 --disk 40"
 
       - name: Verify Docker
         run: |-
@@ -435,6 +437,9 @@ jobs:
           docker info
           docker compose version || true
           docker run --rm hello-world
+          # Confirm Colima has usable resources for Keycloak
+          colima status || true
+          colima list || true
 
       - id: load-extra-keys
         run: echo "EXTRA_KEYS=$(jq -c <otdftests/xtest/extra-keys.json)" >> "${GITHUB_OUTPUT}"

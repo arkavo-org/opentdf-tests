@@ -300,7 +300,16 @@ runs:
       working-directory: otdf-test-platform
     - name: Spin up platform's containerized resources
       shell: bash
-      run: docker compose up -d --wait --wait-timeout 240
+      run: |
+        set -euo pipefail
+        # Keycloak on Colima is slower than bare Linux Docker; allow longer health wait.
+        if ! docker compose up -d --wait --wait-timeout 600; then
+          echo "::error::docker compose failed; dumping service status and logs"
+          docker compose ps -a || true
+          docker compose logs --no-color --tail=200 || true
+          exit 1
+        fi
+        docker compose ps
       working-directory: otdf-test-platform
     - name: Provision realms/clients/users into idP
       shell: bash
