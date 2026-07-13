@@ -40,7 +40,11 @@ on:
       python-ref:
         required: false
         type: string
-        default: latest
+        # Pin past otdf-python-v0.9.1: that release dual-wraps KAS (2 KAOs) and
+        # doubles the OIDC realm path, which breaks Stage-1/2 roundtrips.
+        # Fixed on arkavo-org/opentdf-python-sdk@825b041 (PR b-long#167).
+        # Revert default to `latest` + b-long repo after a post-0.9.1 release.
+        default: "825b041f4fdf886151b24fb17e61ddbe9dad577c"
         description: "opentdf-python-sdk ref: 'latest' (floating release), branch, tag, or SHA"
       rust-ref:
         required: false
@@ -97,7 +101,8 @@ jobs:
     env:
       PLATFORM_REF_IN: ${{ inputs.platform-ref || 'latest' }}
       OTDFCTL_REF_IN: ${{ inputs.otdfctl-ref || 'latest' }}
-      PYTHON_REF_IN: ${{ inputs.python-ref || 'latest' }}
+      # Match workflow_dispatch default (post-0.9.1 Stage-1 fixes); push/PR have no inputs.
+      PYTHON_REF_IN: ${{ inputs.python-ref || '825b041f4fdf886151b24fb17e61ddbe9dad577c' }}
       RUST_REF_IN: ${{ inputs.rust-ref || 'latest' }}
       SWIFT_REF_IN: ${{ inputs.swift-ref || 'latest' }}
       GH_TOKEN: ${{ github.token }}
@@ -177,7 +182,8 @@ jobs:
             GO_CHANNEL="$OTDFCTL_REF_IN"
           fi
 
-          PYTHON_REF=$(resolve_or_pass "$PYTHON_REF_IN" "b-long/opentdf-python-sdk")
+          # arkavo-org hosts the unreleased Stage-1 fix SHA; b-long latest is still 0.9.1.
+          PYTHON_REF=$(resolve_or_pass "$PYTHON_REF_IN" "arkavo-org/opentdf-python-sdk")
           RUST_REF=$(resolve_or_pass "$RUST_REF_IN" "arkavo-org/opentdf-rs")
           SWIFT_REF=$(resolve_or_pass "$SWIFT_REF_IN" "arkavo-org/OpenTDFKit")
 
@@ -310,7 +316,7 @@ jobs:
       - name: Checkout python SDK
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          repository: b-long/opentdf-python-sdk
+          repository: arkavo-org/opentdf-python-sdk
           ref: ${{ env.PYTHON_REF }}
           path: otdftests/xtest/sdk/python/src/main
           persist-credentials: false
@@ -774,7 +780,7 @@ jobs:
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          repository: b-long/opentdf-python-sdk
+          repository: arkavo-org/opentdf-python-sdk
           ref: ${{ env.PYTHON_REF }}
           path: otdftests/xtest/sdk/python/src/main
           persist-credentials: false
@@ -924,7 +930,7 @@ jobs:
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          repository: b-long/opentdf-python-sdk
+          repository: arkavo-org/opentdf-python-sdk
           ref: ${{ env.PYTHON_REF }}
           path: otdftests/xtest/sdk/python/src/main
           persist-credentials: false
