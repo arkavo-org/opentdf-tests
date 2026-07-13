@@ -40,7 +40,11 @@ on:
       python-ref:
         required: false
         type: string
-        default: latest
+        # Pin past otdf-python-v0.9.1: that release dual-wraps KAS (2 KAOs) and
+        # doubles the OIDC realm path, which breaks Stage-1/2 roundtrips.
+        # Fixed on arkavo-org/opentdf-python-sdk@825b041 (PR b-long#167).
+        # Revert default to `latest` + b-long repo after a post-0.9.1 release.
+        default: "825b041f4fdf886151b24fb17e61ddbe9dad577c"
         description: "opentdf-python-sdk ref: 'latest' (floating release), branch, tag, or SHA"
       rust-ref:
         required: false
@@ -97,7 +101,8 @@ jobs:
     env:
       PLATFORM_REF_IN: ${{ inputs.platform-ref || 'latest' }}
       OTDFCTL_REF_IN: ${{ inputs.otdfctl-ref || 'latest' }}
-      PYTHON_REF_IN: ${{ inputs.python-ref || 'latest' }}
+      # Match workflow_dispatch default (post-0.9.1 Stage-1 fixes); push/PR have no inputs.
+      PYTHON_REF_IN: ${{ inputs.python-ref || '825b041f4fdf886151b24fb17e61ddbe9dad577c' }}
       RUST_REF_IN: ${{ inputs.rust-ref || 'latest' }}
       SWIFT_REF_IN: ${{ inputs.swift-ref || 'latest' }}
       GH_TOKEN: ${{ github.token }}
@@ -177,7 +182,8 @@ jobs:
             GO_CHANNEL="$OTDFCTL_REF_IN"
           fi
 
-          PYTHON_REF=$(resolve_or_pass "$PYTHON_REF_IN" "b-long/opentdf-python-sdk")
+          # arkavo-org hosts the unreleased Stage-1 fix SHA; b-long latest is still 0.9.1.
+          PYTHON_REF=$(resolve_or_pass "$PYTHON_REF_IN" "arkavo-org/opentdf-python-sdk")
           RUST_REF=$(resolve_or_pass "$RUST_REF_IN" "arkavo-org/opentdf-rs")
           SWIFT_REF=$(resolve_or_pass "$SWIFT_REF_IN" "arkavo-org/OpenTDFKit")
 
@@ -310,7 +316,7 @@ jobs:
       - name: Checkout python SDK
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          repository: b-long/opentdf-python-sdk
+          repository: arkavo-org/opentdf-python-sdk
           ref: ${{ env.PYTHON_REF }}
           path: otdftests/xtest/sdk/python/src/main
           persist-credentials: false
@@ -350,6 +356,7 @@ jobs:
           SCHEMA_FILE: "manifest.schema.json"
           # Dist channel stays `main` (single under-test build); peer is go@GO_CHANNEL.
         run: |-
+          set -o pipefail
           mkdir -p test-results
           GO_CH="${GO_CHANNEL}"
           uv run pytest -n auto --dist loadscope \
@@ -369,50 +376,19 @@ jobs:
         if: success() || failure()
         working-directory: otdftests/xtest
         run: |-
-          mkdir -p test-results/report-python-ubuntu-latest
-          uv run python - <<'PY'
-          import json, subprocess, os
-          from pathlib import Path
-          from datetime import UTC, datetime
+          uv run python -m reporting.export_supports \
+            --sdk python --sdk-ref "${PYTHON_REF}" --os ubuntu-latest
 
-          features = [
-              "assertions","assertion_verification","attribute_traversal","audit_logging",
-              "autoconfigure","better-messages-2024","bulk_rewrap","connectrpc","dpop",
-              "dpop_nonce_challenge","ecwrap","hexless","hexaflexible","kasallowlist",
-              "key_management","mechanism-rsa-4096","mechanism-ec-curves-384-521",
-              "mechanism-xwing","mechanism-secpmlkem","mechanism-mlkem","ns_grants","obligations",
-          ]
-          cli = Path("sdk/python/dist/main/cli.sh")
-          supports = {}
-          for f in features:
-              try:
-                  r = subprocess.run([str(cli), "supports", f], capture_output=True, timeout=30)
-                  supports[f] = "supported" if r.returncode == 0 else ("unsupported" if r.returncode == 1 else "unknown")
-              except Exception as e:
-                  supports[f] = f"error:{e}"
-
-          out = {
-              "schema_version": 1,
-              "generated_at": datetime.now(UTC).isoformat(),
-              "sdk": "python",
-              "sdk_ref": os.environ.get("PYTHON_REF", "latest"),
-              "platform_ref": os.environ.get("PLATFORM_REF", "latest"),
-              "go_channel": os.environ.get("GO_CHANNEL", "latest"),
-              "tier": "kas-ready",
-              "stage": 1,
-              "supports": supports,
-              "run_id": os.environ.get("GITHUB_RUN_ID"),
-              "repo": os.environ.get("GITHUB_REPOSITORY"),
-          }
-          dest = Path("test-results/report-python-ubuntu-latest")
-          dest.mkdir(parents=True, exist_ok=True)
-          (dest / "supports.json").write_text(json.dumps(out, indent=2))
-          (dest / "meta.json").write_text(json.dumps({
-              "sdk": "python", "os": "ubuntu-latest", "stage": 1,
-              "run_id": os.environ.get("GITHUB_RUN_ID"),
-          }, indent=2))
-          print(json.dumps(out, indent=2))
-          PY
+      # The go reference peer gets a snapshot too (only here, to avoid
+      # duplicate exports across jobs), so the capability matrix can compare
+      # community SDKs against the reference implementation.
+      - name: Export go peer capability snapshot
+        if: success() || failure()
+        working-directory: otdftests/xtest
+        run: |-
+          uv run python -m reporting.export_supports \
+            --sdk go --version "${GO_CHANNEL}" --sdk-ref "${OTDFCTL_REF}" \
+            --tier reference --os ubuntu-latest
 
       - name: Upload results
         if: success() || failure()
@@ -559,6 +535,13 @@ jobs:
             -ra -v \
             test_tdfs.py
 
+      - name: Export capability snapshot
+        if: success() || failure()
+        working-directory: otdftests/xtest
+        run: |-
+          uv run python -m reporting.export_supports \
+            --sdk rust --sdk-ref "${RUST_REF}" --os ubuntu-latest
+
       - if: success() || failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -702,6 +685,13 @@ jobs:
             -ra -v \
             test_tdfs.py
 
+      - name: Export capability snapshot
+        if: success() || failure()
+        working-directory: otdftests/xtest
+        run: |-
+          uv run python -m reporting.export_supports \
+            --sdk swift --sdk-ref "${SWIFT_REF}" --os macos-latest
+
       - if: success() || failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -790,7 +780,7 @@ jobs:
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          repository: b-long/opentdf-python-sdk
+          repository: arkavo-org/opentdf-python-sdk
           ref: ${{ env.PYTHON_REF }}
           path: otdftests/xtest/sdk/python/src/main
           persist-credentials: false
@@ -834,6 +824,7 @@ jobs:
           PLATFORM_TAG: ${{ env.PLATFORM_TAG }}
           SCHEMA_FILE: "manifest.schema.json"
         run: |-
+          set -o pipefail
           mkdir -p test-results
           # Community-only encrypt/decrypt matrix; go remains for attribute fixtures.
           uv run pytest -n auto --dist loadscope \
@@ -939,7 +930,7 @@ jobs:
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          repository: b-long/opentdf-python-sdk
+          repository: arkavo-org/opentdf-python-sdk
           ref: ${{ env.PYTHON_REF }}
           path: otdftests/xtest/sdk/python/src/main
           persist-credentials: false
@@ -991,6 +982,7 @@ jobs:
           PLATFORM_TAG: ${{ env.PLATFORM_TAG }}
           SCHEMA_FILE: "manifest.schema.json"
         run: |-
+          set -o pipefail
           mkdir -p test-results
           uv run pytest -n auto --dist loadscope \
             --html=test-results/community-stage2-swift-peers.html \
