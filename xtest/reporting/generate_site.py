@@ -124,7 +124,7 @@ def collect(input_dir: Path) -> Report:
     for supports in sorted(input_dir.rglob("supports.json")):
         try:
             snap = json.loads(supports.read_text())
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             continue
         sdk = snap.get("sdk")
         if isinstance(sdk, str) and sdk:
