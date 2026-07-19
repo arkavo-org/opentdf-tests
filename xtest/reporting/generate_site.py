@@ -47,6 +47,15 @@ _PEER_RE = re.compile(
     r"\b(go|java|js|python|rust|swift)@([\w.+]+(?:-(?:rc|beta|alpha)\.?\d+)?)"
 )
 
+# Feature suites reported separately from the Base TDF interop matrix, keyed
+# by pytest junit classname (the test module name). Cases in these modules
+# count per participating SDK (encrypt or decrypt) — DPoP negative tests only
+# parametrize an encrypt SDK — and never enter the interop matrix.
+_FEATURE_AREAS = {
+    "test_dpop": "DPoP (RFC 9449)",
+    "test_pqc": "Post-quantum KEM (ML-KEM / X-Wing)",
+}
+
 
 @dataclass
 class Counts:
@@ -87,6 +96,9 @@ class Report:
         default_factory=lambda: defaultdict(Counts)
     )
     sdk_counts: dict[str, Counts] = field(default_factory=lambda: defaultdict(Counts))
+    feature_counts: dict[str, dict[str, Counts]] = field(
+        default_factory=lambda: defaultdict(lambda: defaultdict(Counts))
+    )
     snapshots: dict[str, dict] = field(default_factory=dict)
     junit_files: int = 0
 
@@ -114,7 +126,12 @@ def collect(input_dir: Path) -> Report:
         for case in root.iter("testcase"):
             outcome = _testcase_outcome(case)
             peers = _PEER_RE.findall(case.attrib.get("name", ""))
-            if len(peers) >= 2:
+            module = case.attrib.get("classname", "").rsplit(".", 1)[-1]
+            area = _FEATURE_AREAS.get(module)
+            if area is not None:
+                for sdk in {p[0] for p in peers}:
+                    report.feature_counts[area][sdk].add(outcome)
+            elif len(peers) >= 2:
                 enc = f"{peers[0][0]}@{peers[0][1]}"
                 dec = f"{peers[1][0]}@{peers[1][1]}"
                 report.pair_counts[(enc, dec)].add(outcome)
@@ -304,6 +321,39 @@ def _render_matrix(report: Report) -> str:
 """
 
 
+def _render_features(report: Report) -> str:
+    # One row per feature suite that produced at least one testcase; a suite
+    # with zero cases (lane not run yet) is omitted entirely.
+    areas = {
+        area: counts
+        for area, counts in report.feature_counts.items()
+        if any(c.total for c in counts.values())
+    }
+    if not areas:
+        return ""
+    sdks = sorted(
+        {sdk for counts in areas.values() for sdk in counts},
+        key=lambda s: (0 if s in COMMUNITY_SDKS else 1, s),
+    )
+    head = "".join(f'<th class="peer">{_esc(s)}</th>' for s in sdks)
+    rows = []
+    for area in sorted(areas):
+        cells = "".join(_pair_cell(areas[area].get(sdk)) for sdk in sdks)
+        rows.append(f'<tr><td class="feature">{_esc(area)}</td>{cells}</tr>')
+    return f"""
+  <h2 id="features">Feature conformance</h2>
+  <p class="section-note">Verified results from the DPoP and post-quantum KEM
+  suites (<code>test_dpop.py</code>, <code>test_pqc.py</code>), counted per
+  participating SDK. These lanes are dormant by design: an all-skipped cell
+  means the SDK does not claim the feature yet via <code>cli.sh supports</code>
+  — it lights up automatically once support lands.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>feature suite</th>{head}</tr></thead>
+    <tbody>{"".join(rows)}</tbody>
+  </table></div>
+"""
+
+
 _FEATURE_GLYPHS = {
     "supported": ("ok", "✓ yes"),
     "unsupported": ("none", "–"),
@@ -391,6 +441,7 @@ def render_html(report: Report, generated: str) -> str:
         body = (
             f'<div class="cards">{_render_cards(report)}</div>'
             + _render_matrix(report)
+            + _render_features(report)
             + _render_capabilities(report)
         )
     else:
@@ -454,6 +505,11 @@ def generate(input_dir: Path, output_dir: Path) -> None:
         "pairs": [
             {"encrypt": enc, "decrypt": dec, **counts.as_dict()}
             for (enc, dec), counts in sorted(report.pair_counts.items())
+        ],
+        "features": [
+            {"area": area, "sdk": sdk, **counts.as_dict()}
+            for area, sdks in sorted(report.feature_counts.items())
+            for sdk, counts in sorted(sdks.items())
         ],
     }
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2))

@@ -116,11 +116,13 @@ if [ "$1" == "supports" ]; then
       exit $?
       ;;
     dpop | dpop_nonce_challenge)
-      # DPoP support is signalled by the --dpop / --dpop-key flag on encrypt.
-      # The same probe covers nonce-challenge support: when nonce mode is
-      # required by the server, the SDK's existing 401-retry uses the same
-      # plumbing as the base DPoP path.
       set -o pipefail
+      # Prefer the machine-readable feature list when otdfctl provides one;
+      # fall back to the help-text probe so builds whose --version --json
+      # lacks supported_features don't silently report "unsupported".
+      if "${cmd[@]}" --version --json 2>/dev/null | jq -e --arg f "$2" '.supported_features // [] | index($f)' >/dev/null 2>&1; then
+        exit 0
+      fi
       "${cmd[@]}" help encrypt | grep -iE -- '--dpop'
       exit $?
       ;;

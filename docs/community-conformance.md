@@ -21,6 +21,22 @@ For each **kas-ready** community SDK:
 3. Container: **Base TDF (`tdf`) only** — not NATO ZTDF, not NanoTDF, not full ABAC/PQC
 4. Feature honesty: `cli.sh supports <feature>` must not advertise features that fail tests
 
+## Feature lanes (DPoP + PQ/T KEM)
+
+Each Stage-1 job also runs the upstream feature suites as **dormant lanes**:
+`test_dpop.py` (all three SDKs) and `test_pqc.py` (ubuntu jobs — python, rust —
+which start a km1 key-management KAS; the macOS job's native platform has no km1).
+
+Every case skips until the SDK's `cli.sh supports <feature>` claims the
+corresponding feature (`dpop`, `dpop_nonce_challenge`, `mechanism-xwing`,
+`mechanism-secpmlkem`, `mechanism-mlkem`) — the lanes light up automatically
+when support lands in an SDK repo. `workflow_dispatch` input `dpop-challenge`
+enables KAS `require_nonce` for the nonce-challenge suite on ubuntu.
+
+Results appear in the **Feature conformance** table on the Pages report
+(counted per participating SDK), separate from the Base TDF interop matrix;
+claimed-vs-verified features stay visible in the capability matrix.
+
 ## What Stage-2 proves
 
 When ≥2 community SDKs are kas-ready (criterion met for python + rust + swift):

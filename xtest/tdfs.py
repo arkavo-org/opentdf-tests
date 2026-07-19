@@ -40,6 +40,7 @@ def _algs_from_km1_log() -> set[str]:
     """
     log = _km1_log_path()
     if not log or not log.exists():
+        logger.debug("km1 log not found (path=%s); no algs from log", log)
         return set()
     algs: set[str] = set()
     try:
@@ -59,7 +60,7 @@ def _algs_from_km1_log() -> set[str]:
                         if alg := k.get("alg"):
                             algs.add(alg)
     except Exception:
-        pass
+        logger.debug("failed reading km1 log %s", log, exc_info=True)
     return algs
 
 
@@ -94,7 +95,8 @@ def _kas_supports_algorithm(algorithm: str) -> bool:
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
             return resp.status == 200
-    except Exception:
+    except Exception as e:
+        logger.debug("KAS algorithm probe for %s at %s failed: %s", algorithm, url, e)
         return False
 
 
@@ -757,6 +759,64 @@ def skip_hexless_skew(encrypt_sdk: SDK, decrypt_sdk: SDK):
 
 def skip_connectrpc_skew(encrypt_sdk: SDK, decrypt_sdk: SDK, pfs: PlatformFeatureSet):
     return False
+
+
+def _parse_semver(version: str) -> tuple[int, int, int] | None:
+    """Parse a version string (optional 'sdk/' and/or 'v' prefix) into (major, minor, patch)."""
+    m = _version_re.match(re.sub(r"^(?:sdk/)?v?", "", version))
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+
+def _otdfctl_semver() -> tuple[int, int, int] | None:
+    """Parse otdfctl version from OTDFCTL_HEADS; None if unresolvable (main, dev, etc.)."""
+    oh = os.environ.get("OTDFCTL_HEADS", "[]")
+    try:
+        heads = json.loads(oh)
+    except json.JSONDecodeError:
+        return None
+    if not heads:
+        return None
+    return _parse_semver(str(heads[0]))
+
+
+# go SDK ≤ this version used pre-ocrypto-0.13.0 hybrid KEM format (non-conformant).
+_PQC_HYBRID_FORMAT_CUTOFF = (0, 33, 0)
+
+
+def skip_pqc_hybrid_format_skew(encrypt_sdk: SDK | None = None) -> None:
+    """Skip if the encrypt SDK or otdfctl predates the lib/ocrypto v0.13.0 hybrid-KEM format.
+
+    Two independent sources of format incompatibility:
+    - otdfctl ≤ 0.33.0: registers hybrid KAS keys in old non-conformant format.
+    - go encrypt SDK ≤ 0.33.0: produces hybrid KEM ciphertexts (wrappedKey) in old format.
+    Either causes opaque crypto failures when paired with a platform that has hybrid PQC
+    support enabled (new-format KAS); skip early with a clear message instead.
+    """
+    pfs = get_platform_features()
+    if (
+        "mechanism-xwing" not in pfs.features
+        and "mechanism-secpmlkem" not in pfs.features
+    ):
+        return
+    otdfctl_ver = _otdfctl_semver()
+    if otdfctl_ver is not None and otdfctl_ver <= _PQC_HYBRID_FORMAT_CUTOFF:
+        pytest.skip(
+            f"otdfctl v{'.'.join(map(str, otdfctl_ver))} predates lib/ocrypto v0.13.0; "
+            "hybrid key material format is incompatible with this platform"
+        )
+    if (
+        encrypt_sdk is not None
+        and encrypt_sdk.sdk == "go"
+        and encrypt_sdk.is_released()
+    ):
+        sdk_ver = _parse_semver(encrypt_sdk.version)
+        if sdk_ver is not None and sdk_ver <= _PQC_HYBRID_FORMAT_CUTOFF:
+            pytest.skip(
+                f"{encrypt_sdk} predates lib/ocrypto v0.13.0; "
+                "hybrid KEM ciphertext format is incompatible with this platform"
+            )
 
 
 def select_target_version(
