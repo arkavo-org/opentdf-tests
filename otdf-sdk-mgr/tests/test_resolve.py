@@ -136,6 +136,30 @@ class TestResolveSHA:
         assert is_resolve_success(result)
         assert result["tag"] == "pull-99"
 
+    def test_multiple_matches_ambiguous_tags_error(self):
+        # Two release tags on the same commit, no branch/PR to disambiguate:
+        # must fail loudly instead of silently picking ls-remote order.
+        ls = make_ls_remote(
+            (SHA40, "refs/tags/v1.0.0"),
+            (SHA40, "refs/tags/v1.0.1"),
+        )
+        with patch_git(ls):
+            result = resolve("go", SHA40, None)
+        assert is_resolve_error(result)
+        assert "unable to differentiate" in result["err"]
+
+    def test_multiple_matches_single_tag_resolves(self):
+        # One tag plus the symbolic HEAD ref: HEAD never wins, so the tag is
+        # an unambiguous winner and must not trip the ambiguity error.
+        ls = make_ls_remote(
+            (SHA40, "HEAD"),
+            (SHA40, "refs/tags/v1.0.0"),
+        )
+        with patch_git(ls):
+            result = resolve("go", SHA40, None)
+        assert is_resolve_success(result)
+        assert result["tag"] == "v1.0.0"
+
     def test_multiple_matches_merge_queue(self):
         mq_ref = f"refs/heads/gh-readonly-queue/main/pr-42-{SHA40}"
         ls = make_ls_remote(

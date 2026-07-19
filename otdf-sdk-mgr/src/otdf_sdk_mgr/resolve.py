@@ -259,6 +259,21 @@ def _resolve_against(
             # Prefer the most specific (PR > merge-queue > branch/tag) so the dist
             # tag is meaningful and source-built refs get flagged as heads.
             sha, ref = min(matching_tags, key=lambda st: _ref_specificity(st[1]))
+            best = _ref_specificity(ref)
+            # Tag-level or worse with no unique winner is genuinely ambiguous
+            # (e.g. two release tags on one commit): fail loudly rather than
+            # silently picking whichever ref ls-remote listed first.
+            if best >= 3 and sum(
+                1 for _, r in matching_tags if _ref_specificity(r) == best
+            ) > 1:
+                return {
+                    "sdk": sdk,
+                    "alias": version,
+                    "err": (
+                        f"SHA {version} points to multiple tags, unable to "
+                        f"differentiate: {', '.join(r for _, r in matching_tags)}"
+                    ),
+                }
             return _classify_sha_match(sdk, version, sha, ref, infix)
 
         if version.startswith("refs/pull/"):

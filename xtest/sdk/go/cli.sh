@@ -117,8 +117,13 @@ if [ "$1" == "supports" ]; then
       ;;
     dpop | dpop_nonce_challenge)
       set -o pipefail
-      "${cmd[@]}" --version --json | jq -e --arg f "$2" '.supported_features |
- index($f)'
+      # Prefer the machine-readable feature list when otdfctl provides one;
+      # fall back to the help-text probe so builds whose --version --json
+      # lacks supported_features don't silently report "unsupported".
+      if "${cmd[@]}" --version --json 2>/dev/null | jq -e --arg f "$2" '.supported_features // [] | index($f)' >/dev/null 2>&1; then
+        exit 0
+      fi
+      "${cmd[@]}" help encrypt | grep -iE -- '--dpop'
       exit $?
       ;;
     *)
