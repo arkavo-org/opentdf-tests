@@ -73,6 +73,17 @@ issuer: "https://YOUR_TENANT.us.auth0.com/"
 compares issuer strings exactly — `https://tenant.us.auth0.com` (no slash)
 will not match the discovered issuer.
 
+Then flip the provider on:
+
+```yaml
+onboarded: true
+```
+
+`onboarded: false` keeps the provider out of the nightly matrix even when
+secrets exist. No Auth0-side role setup is needed — the platform overlay
+maps the M2M token's `gty` claim to the platform admin role automatically
+(`platform_overlay.casbin_*` in the provider config).
+
 ## 8. Verify manually (optional)
 
 ```bash
@@ -90,6 +101,15 @@ Decode the token (e.g. <https://jwt.io>) and confirm `iss` is
 
 Then run the suite per `docs/idp-conformance.md` (render the overlay, restart
 the platform, `uv run pytest test_idp_conformance.py --idp-providers auth0 -v`).
+
+## Known issues
+
+- **`tdf_roundtrip` xfails with the go SDK** — the SDK attaches an RS256 DPoP
+  proof to every token request (no opt-out), which Auth0 rejects
+  (`invalid_dpop_proof`). Tracked as
+  [arkavo-org/platform#2](https://github.com/arkavo-org/platform/issues/2);
+  the check is marked `known_issues` in the provider config, so it reports as
+  xfail (not a failure) and will XPASS once the SDK is fixed.
 
 ## Rotation
 
