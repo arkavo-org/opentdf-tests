@@ -27,3 +27,8 @@ ers:
   required_claims: [sub]
 platform_overlay:
   dpop_enforce: false
+  # Auth0 tokens carry no platform role claims, and v1 casbin subjects are the
+  # token's groups + sub. Grant the M2M client (sub = "<client_id>@clients")
+  # the admin role so ERS/policy calls are authorized.
+  casbin_extension: |
+    g, ${IDP_AUTH0_CLIENT_ID}@clients, role:admin

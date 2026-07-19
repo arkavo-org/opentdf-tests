@@ -41,6 +41,9 @@ class ErsConfig(BaseModel):
 
 class PlatformOverlay(BaseModel):
     dpop_enforce: bool = False
+    # Extra casbin policy lines (server.auth.policy.extension) — e.g. grant the
+    # provider's client a platform role it has no IdP claim for.
+    casbin_extension: str | None = None
 
 
 class IdpProvider(BaseModel):

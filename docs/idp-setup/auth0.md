@@ -35,12 +35,23 @@ why the provider config passes `token_endpoint_params.audience`.
 
 - Type: **Machine to Machine**
 - Authorize it on **both** APIs from steps 2 and 3 (the wizard prompts for
-  one; add the second under the application's **APIs** tab afterward).
+  one; add the second under the application's **APIs** tab afterward — toggle
+  **Authorized** next to each API; no scopes/permissions are needed).
 - Grant type: `client_credentials` (default for M2M apps).
 
 Copy the **Client ID** and **Client Secret**.
 
-## 5. Set the secrets
+## 5. Set the tenant Default Audience (required for SDKs)
+
+Some SDKs request a token **without** an `audience` parameter, and Auth0
+refuses those requests with
+`access_denied: No audience parameter was provided, and no default audience has been configured`.
+Set a tenant-wide default so those requests mint tokens for the platform API:
+
+**Tenant Settings (gear icon) → General → API Authorization Settings →
+Default Audience** → `http://localhost:8080` → Save.
+
+## 6. Set the secrets
 
 GitHub Actions (repo **Settings → Secrets and variables → Actions**):
 
@@ -49,7 +60,7 @@ GitHub Actions (repo **Settings → Secrets and variables → Actions**):
 
 For local runs, export the same variables in your shell.
 
-## 6. Point the provider config at the tenant
+## 7. Point the provider config at the tenant
 
 In `xtest/idp/providers/auth0.yaml`, replace the issuer placeholder with the
 real tenant domain:
@@ -62,7 +73,7 @@ issuer: "https://YOUR_TENANT.us.auth0.com/"
 compares issuer strings exactly — `https://tenant.us.auth0.com` (no slash)
 will not match the discovered issuer.
 
-## 7. Verify manually (optional)
+## 8. Verify manually (optional)
 
 ```bash
 curl -s https://YOUR_TENANT.us.auth0.com/oauth/token \

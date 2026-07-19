@@ -34,6 +34,10 @@ def render_overlay(provider_name: str, base_path: Path) -> dict[str, Any]:
     auth["issuer"] = provider.issuer
     auth["audience"] = provider.audience
     auth.setdefault("dpop", {})["enforce"] = provider.platform_overlay.dpop_enforce
+    if provider.platform_overlay.casbin_extension:
+        auth.setdefault("policy", {})["extension"] = (
+            provider.platform_overlay.casbin_extension
+        )
     config.setdefault("services", {}).setdefault("entityresolution", {})["mode"] = (
         provider.ers.mode
     )
