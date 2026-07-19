@@ -1,0 +1,419 @@
+# Black-box IdP conformance (GitHub discussion opentdf#3327).
+#
+# Runs the provider-agnostic checks in xtest/test_idp_conformance.py against
+# OIDC providers described by xtest/idp/providers/*.yaml:
+#   - keycloak (tier: local): always on; validates the suite itself against the
+#     known-good dev realm. This is all that runs on PRs.
+#   - external providers (auth0, okta, entra, cognito, google): run when their
+#     IDP_* secrets exist, on the nightly schedule (or manual/called runs).
+#     Each needs the platform reconfigured for that issuer — done here by
+#     rendering an overlay via `uv run python -m idp.platform_config`.
+#
+# Triggers:
+#   - pull_request (path-filtered to the suite): keycloak tier only, no secrets.
+#   - schedule (nightly): full matrix with --idp-strict; failures open/update an
+#     issue (a failure is often "the provider changed something" or an expired
+#     tenant secret — it should page the provider owner, not wedge main).
+#   - workflow_dispatch / workflow_call: `providers` + `platform-ref` inputs.
+#     The platform repo is expected to call this on PRs touching
+#     service/internal/auth, service/entityresolution, service/kas,
+#     service/wellknownconfiguration, sdk/auth, protocol/go (see
+#     docs/idp-conformance.md).
+name: IdP Conformance
+
+on:
+  pull_request:
+    paths:
+      - "xtest/idp/**"
+      - "xtest/fixtures/idp.py"
+      - "xtest/test_idp_conformance.py"
+      - ".github/workflows/idp-conformance.yml"
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+    inputs:
+      providers:
+        required: false
+        type: string
+        default: "all"
+        description: "'all' or space-separated provider names from xtest/idp/providers/"
+      platform-ref:
+        required: false
+        type: string
+        default: latest
+        description: "opentdf/platform ref: 'latest'/'lts', branch, tag, or SHA"
+      otdfctl-ref:
+        required: false
+        type: string
+        default: latest
+        description: "otdfctl ref: 'latest'/'lts', branch, tag, or SHA"
+  workflow_call:
+    inputs:
+      providers:
+        required: false
+        type: string
+        default: "keycloak"
+        description: "'all' or space-separated provider names from xtest/idp/providers/"
+      platform-ref:
+        required: false
+        type: string
+        default: latest
+      otdfctl-ref:
+        required: false
+        type: string
+        default: latest
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve providers + refs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.providers.outputs.matrix }}
+      platform-ref: ${{ steps.refs.outputs.platform-ref }}
+      platform-tag: ${{ steps.refs.outputs.platform-tag }}
+      go-ref: ${{ steps.refs.outputs.go-ref }}
+      go-channel: ${{ steps.refs.outputs.go-channel }}
+    env:
+      # PRs only ever run the local Keycloak tier (no secrets available).
+      PROVIDERS_IN: ${{ github.event_name == 'pull_request' && 'keycloak' || (inputs.providers || 'all') }}
+      PLATFORM_REF_IN: ${{ inputs.platform-ref || 'latest' }}
+      OTDFCTL_REF_IN: ${{ inputs.otdfctl-ref || 'latest' }}
+    steps:
+      # The reusable workflow may be invoked cross-repo (platform repo caller):
+      # github.workflow_ref always points at THIS workflow's repo@ref, which is
+      # where the test code lives — derive the checkout from it.
+      - name: Called repo handle
+        id: called
+        run: |
+          wr="${{ github.workflow_ref }}"
+          echo "repo=${wr%%/.github/workflows/*}" >> "$GITHUB_OUTPUT"
+          echo "ref=${wr##*@}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ steps.called.outputs.repo }}
+          ref: ${{ steps.called.outputs.ref }}
+          path: otdftests
+          persist-credentials: false
+
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
+        with:
+          python-version: "3.14"
+
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+
+      - name: Compute provider matrix
+        id: providers
+        working-directory: otdftests/xtest
+        run: |
+          set -euo pipefail
+          names="${PROVIDERS_IN}"
+          if [ "$names" = "all" ]; then
+            names=$(ls idp/providers/*.yaml | xargs -n1 basename | sed 's/\.yaml$//' | tr '\n' ' ')
+          fi
+          out='['
+          first=1
+          for n in $names; do
+            f="idp/providers/${n}.yaml"
+            [ -f "$f" ] || { echo "unknown provider: $n" >&2; exit 1; }
+            tier=$(grep -E '^tier:' "$f" | awk '{print $2}')
+            [ -n "$tier" ] || { echo "provider $n has no tier" >&2; exit 1; }
+            onboarded=$(grep -E '^onboarded:' "$f" | awk '{print $2}' || true)
+            if [ "$tier" = "external" ] && [ "$onboarded" = "false" ]; then
+              echo "excluding $n (external, onboarded=false)" >&2
+              continue
+            fi
+            [ "$first" = "0" ] && out="$out,"
+            out="$out{\"name\":\"$n\",\"tier\":\"$tier\"}"
+            first=0
+          done
+          out="$out]"
+          echo "matrix=$out" >> "$GITHUB_OUTPUT"
+          echo "provider matrix: $out"
+
+      - name: Resolve latest → concrete refs
+        id: refs
+        working-directory: otdftests
+        run: |
+          set -euo pipefail
+          resolve_mgr() {
+            local sdk="$1" alias="$2"
+            local info
+            info=$(uv run --project otdf-sdk-mgr otdf-sdk-mgr versions resolve "$sdk" "$alias")
+            echo "$info" | jq -e '.[0] | select(.err == null)' >/dev/null \
+              || { echo "$info" | jq .; echo "failed to resolve $sdk@$alias" >&2; exit 1; }
+            echo "$info"
+          }
+          if [[ "$PLATFORM_REF_IN" == "latest" || "$PLATFORM_REF_IN" == "lts" ]]; then
+            PINFO=$(resolve_mgr platform "$PLATFORM_REF_IN")
+            echo "platform-ref=$(echo "$PINFO" | jq -r '.[0].release // .[0].tag')" >> "$GITHUB_OUTPUT"
+            echo "platform-tag=$(echo "$PINFO" | jq -r '.[0].alias')" >> "$GITHUB_OUTPUT"
+          else
+            echo "platform-ref=$PLATFORM_REF_IN" >> "$GITHUB_OUTPUT"
+            echo "platform-tag=$PLATFORM_REF_IN" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ "$OTDFCTL_REF_IN" == "latest" || "$OTDFCTL_REF_IN" == "lts" ]]; then
+            GINFO=$(resolve_mgr go "$OTDFCTL_REF_IN")
+            echo "go-ref=$(echo "$GINFO" | jq -r '.[0].release // .[0].tag')" >> "$GITHUB_OUTPUT"
+            echo "go-channel=$(echo "$GINFO" | jq -r '.[0].tag // .[0].alias')" >> "$GITHUB_OUTPUT"
+          else
+            echo "go-ref=$OTDFCTL_REF_IN" >> "$GITHUB_OUTPUT"
+            echo "go-channel=$OTDFCTL_REF_IN" >> "$GITHUB_OUTPUT"
+          fi
+
+  conformance:
+    name: "${{ matrix.provider.name }} (${{ matrix.provider.tier }})"
+    needs: [resolve]
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: ${{ fromJson(needs.resolve.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      PROVIDER: ${{ matrix.provider.name }}
+      PLATFORM_REF: ${{ needs.resolve.outputs.platform-ref }}
+      PLATFORM_TAG: ${{ needs.resolve.outputs.platform-tag }}
+      OTDFCTL_REF: ${{ needs.resolve.outputs.go-ref }}
+      GO_CHANNEL: ${{ needs.resolve.outputs.go-channel }}
+      # Per-provider tenant secrets. Unset secrets arrive as empty strings and
+      # the suite skips the provider (PR/called runs) or fails (nightly strict).
+      IDP_AUTH0_CLIENT_ID: ${{ secrets.IDP_AUTH0_CLIENT_ID }}
+      IDP_AUTH0_CLIENT_SECRET: ${{ secrets.IDP_AUTH0_CLIENT_SECRET }}
+      IDP_OKTA_CLIENT_ID: ${{ secrets.IDP_OKTA_CLIENT_ID }}
+      IDP_OKTA_CLIENT_SECRET: ${{ secrets.IDP_OKTA_CLIENT_SECRET }}
+      IDP_ENTRA_TENANT_ID: ${{ secrets.IDP_ENTRA_TENANT_ID }}
+      IDP_ENTRA_AUDIENCE: ${{ secrets.IDP_ENTRA_AUDIENCE }}
+      IDP_ENTRA_CLIENT_ID: ${{ secrets.IDP_ENTRA_CLIENT_ID }}
+      IDP_ENTRA_CLIENT_SECRET: ${{ secrets.IDP_ENTRA_CLIENT_SECRET }}
+      IDP_COGNITO_REGION: ${{ secrets.IDP_COGNITO_REGION }}
+      IDP_COGNITO_USER_POOL_ID: ${{ secrets.IDP_COGNITO_USER_POOL_ID }}
+      IDP_COGNITO_CLIENT_ID: ${{ secrets.IDP_COGNITO_CLIENT_ID }}
+      IDP_COGNITO_CLIENT_SECRET: ${{ secrets.IDP_COGNITO_CLIENT_SECRET }}
+      IDP_GOOGLE_AUDIENCE: ${{ secrets.IDP_GOOGLE_AUDIENCE }}
+      IDP_GOOGLE_CLIENT_ID: ${{ secrets.IDP_GOOGLE_CLIENT_ID }}
+      IDP_GOOGLE_CLIENT_SECRET: ${{ secrets.IDP_GOOGLE_CLIENT_SECRET }}
+    steps:
+      - name: Called repo handle
+        id: called
+        run: |
+          wr="${{ github.workflow_ref }}"
+          echo "repo=${wr%%/.github/workflows/*}" >> "$GITHUB_OUTPUT"
+          echo "ref=${wr##*@}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tests
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ steps.called.outputs.repo }}
+          ref: ${{ steps.called.outputs.ref }}
+          path: otdftests
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
+        with:
+          python-version: "3.14"
+
+      - name: Set up Go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+        with:
+          go-version: "1.24.x"
+
+      - name: Install xtest deps
+        run: uv sync
+        working-directory: otdftests/xtest
+
+      ######## local tier: platform + Keycloak via the upstream action ########
+      - name: Load extra keys
+        if: matrix.provider.tier == 'local'
+        id: load-extra-keys
+        run: echo "EXTRA_KEYS=$(jq -c <otdftests/xtest/extra-keys.json)" >> "${GITHUB_OUTPUT}"
+
+      - name: Start platform with containers
+        if: matrix.provider.tier == 'local'
+        id: run-platform
+        uses: opentdf/platform/test/start-up-with-containers@6dd5f649347fb2314c6090ea6d090a5c673d58a6 # ci-startup-yaml-fix (opentdf/platform#3750)
+        with:
+          platform-ref: ${{ env.PLATFORM_REF }}
+          ec-tdf-enabled: true
+          extra-keys: ${{ steps.load-extra-keys.outputs.EXTRA_KEYS }}
+          log-type: json
+
+      ######## external tier: platform pointed at the provider's issuer ########
+      - name: Checkout platform
+        if: matrix.provider.tier == 'external'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: opentdf/platform
+          ref: ${{ env.PLATFORM_REF }}
+          path: otdf-test-platform
+          persist-credentials: false
+
+      - name: Render IdP overlay config
+        if: matrix.provider.tier == 'external'
+        working-directory: otdftests/xtest
+        run: |
+          uv run python -m idp.platform_config "${PROVIDER}" \
+            --base ../../otdf-test-platform/opentdf-dev.yaml \
+            --out ../../otdf-test-platform/opentdf.yaml
+          grep -A4 '^  auth:' ../../otdf-test-platform/opentdf.yaml || true
+
+      - name: Start Postgres
+        if: matrix.provider.tier == 'external'
+        working-directory: otdf-test-platform
+        run: docker compose up -d --wait opentdfdb
+
+      - name: Build and start platform
+        if: matrix.provider.tier == 'external'
+        working-directory: otdf-test-platform
+        run: |
+          set -e
+          mkdir -p logs
+          # Generate the KAS key files referenced by opentdf-dev.yaml
+          # (kas-private.pem, kas-cert.pem, kas-ec-*) — the same script the
+          # upstream start-up-with-containers action uses.
+          sh .github/scripts/init-temp-keys.sh
+          go build -o opentdf -v service/main.go
+          nohup ./opentdf start > logs/kas-main.log 2>&1 &
+          for i in $(seq 1 45); do
+            curl -sf http://localhost:8080/healthz >/dev/null && exit 0
+            sleep 2
+          done
+          echo "platform did not become healthy; last log lines:" >&2
+          tail -50 logs/kas-main.log >&2
+          exit 1
+
+      - name: Provision test fixture policy
+        if: matrix.provider.tier == 'external'
+        # Attribute-free roundtrip does not depend on fixtures; keep non-fatal.
+        continue-on-error: true
+        working-directory: otdf-test-platform
+        run: go run ./service provision fixtures
+
+      ######## shared: platform handle + go CLI for the roundtrip check ########
+      - name: Platform handle
+        id: platform-dir
+        run: |
+          if [ "${{ matrix.provider.tier }}" = "external" ]; then
+            echo "dir=otdf-test-platform" >> "$GITHUB_OUTPUT"
+            echo "log=otdf-test-platform/logs/kas-main.log" >> "$GITHUB_OUTPUT"
+          else
+            echo "dir=${{ steps.run-platform.outputs.platform-working-dir }}" >> "$GITHUB_OUTPUT"
+            echo "log=${{ steps.run-platform.outputs.platform-log-file }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Capture platform otdfctl location
+        id: platform-otdfctl
+        run: |-
+          if [ -d "${{ steps.platform-dir.outputs.dir }}/otdfctl" ] && [ -f "${{ steps.platform-dir.outputs.dir }}/otdfctl/go.mod" ]; then
+            echo "dir=$(pwd)/${{ steps.platform-dir.outputs.dir }}/otdfctl" >> "$GITHUB_OUTPUT"
+            sha=$(git -C "${{ steps.platform-dir.outputs.dir }}" rev-parse HEAD)
+            echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          else
+            echo "dir=" >> "$GITHUB_OUTPUT"
+            echo "sha=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve go CLI
+        id: resolve-go
+        working-directory: otdftests
+        run: |-
+          INFO=$(uv run --project otdf-sdk-mgr otdf-sdk-mgr versions resolve go "${OTDFCTL_REF}")
+          echo "version-info=$INFO" >> "$GITHUB_OUTPUT"
+          echo "$INFO" | jq .
+
+      - name: Configure otdfctl (go)
+        id: configure-go
+        uses: ./otdftests/xtest/setup-cli-tool
+        with:
+          path: otdftests/xtest/sdk
+          sdk: go
+          version-info: ${{ steps.resolve-go.outputs.version-info }}
+          platform-otdfctl-dir: ${{ steps.platform-otdfctl.outputs.dir }}
+          platform-otdfctl-sha: ${{ steps.platform-otdfctl.outputs.sha }}
+
+      - name: Build go CLI
+        if: fromJson(steps.configure-go.outputs.heads)[0] != null
+        run: make
+        working-directory: otdftests/xtest/sdk/go
+
+      - name: Run IdP conformance suite
+        working-directory: otdftests/xtest
+        env:
+          SCHEMA_FILE: manifest.schema.json
+          OTDFCTL_HEADS: ${{ steps.configure-go.outputs.heads }}
+        run: |-
+          set -o pipefail
+          mkdir -p test-results
+          STRICT_FLAG=""
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            STRICT_FLAG="--idp-strict"
+          fi
+          uv run pytest test_idp_conformance.py \
+            --idp-providers "${PROVIDER}" ${STRICT_FLAG} \
+            --junitxml="test-results/idp-conformance-${PROVIDER}.junit.xml" \
+            -ra -v \
+            | tee "test-results/idp-conformance-${PROVIDER}.log"
+
+      - name: Upload results
+        if: success() || failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ job.status == 'success' && '✅' || '❌' }} idp-conformance-results-${{ matrix.provider.name }}
+          path: otdftests/xtest/test-results/**
+
+      - name: Upload platform logs on failure
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: idp-conformance-logs-${{ matrix.provider.name }}
+          # Covers both tiers and early failures (before the platform handle step).
+          path: |
+            ${{ steps.platform-dir.outputs.log }}
+            otdf-test-platform/logs/
+          if-no-files-found: ignore
+
+  report:
+    name: File issue on scheduled failure
+    needs: [conformance]
+    if: always() && github.event_name == 'schedule' && needs.conformance.result == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or update the conformance failure issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |-
+          set -euo pipefail
+          title="Nightly IdP conformance failure"
+          gh label create idp-conformance --force 2>/dev/null || true
+          existing=$(gh issue list --state open --label idp-conformance --json number --jq '.[0].number // empty')
+          body="Nightly IdP conformance run failed: ${RUN_URL}
+          Check the per-provider artifacts (idp-conformance-*) for which checks failed.
+          A common cause is an expired tenant secret — see the provider owner in xtest/idp/providers/."
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+            echo "updated issue #$existing"
+          else
+            gh issue create --title "$title" --label idp-conformance --body "$body"
+            echo "opened new issue"
+          fi

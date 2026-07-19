@@ -1,0 +1,29 @@
+# Local Keycloak dev realm, provisioned by `service provision keycloak`.
+# Always available; doubles as the suite's self-check against a known-good IdP.
+name: keycloak
+display_name: "Keycloak (local dev realm)"
+tier: local
+owner: "opentdf (provisioned locally)"
+issuer: "${KCFULLURL:-http://localhost:8888/auth/realms/opentdf}"
+audience: "http://localhost:8080"
+client_id: "${CLIENTID:-opentdf}"
+client_secret: "${CLIENTSECRET:-secret}"
+# Keycloak binds DPoP per-client; the DPoP-bound client is provisioned
+# alongside `opentdf` by `service provision keycloak`.
+dpop_client_id: "opentdf-dpop"
+dpop_client_secret: "secret"
+token_endpoint_params: {}
+capabilities:
+  # The dev realm does not bind DPoP tokens today (the opentdf-dpop client's
+  # binding attribute is not honored), so treat support as unknown rather than
+  # letting --idp-strict page on it nightly. Platform-side DPoP is covered by
+  # test_dpop.py.
+  dpop:
+  # No provisioned client without the platform audience mapper today.
+  custom_audience: false
+  configurable_token_lifetime: false
+ers:
+  mode: keycloak
+  required_claims: [sub]
+platform_overlay:
+  dpop_enforce: false

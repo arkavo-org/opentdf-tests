@@ -13,28 +13,22 @@ intentionally do not expose hooks to mis-sign or tamper with their own proofs
 
 import base64
 import filecmp
-import hashlib
 import json
 import os
 import secrets
-import time
-import uuid
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 from urllib.parse import urlparse
 
 import pytest
 import requests
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding, rsa
-from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 
 import tdfs
 from abac import Attribute
 from audit_logs import AuditLogAsserter
 from fixtures.encryption import EncryptFactory
+from idp.dpop import DPoPAccessToken, DPoPKey, time_now
+from idp.dpop import jwt_payload as _jwt_payload
 
 
 def _token_endpoint() -> str:
@@ -45,131 +39,6 @@ def _token_endpoint() -> str:
         f"{os.getenv('KCHOST', 'http://localhost:8888')}/auth/realms/{os.getenv('REALM', 'opentdf')}",
     )
     return f"{kc_full_url}/protocol/openid-connect/token"
-
-
-def _b64u(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
-
-
-def _b64u_int(value: int) -> str:
-    length = (value.bit_length() + 7) // 8
-    return _b64u(value.to_bytes(length, "big"))
-
-
-def _jwt_payload(token: str) -> dict[str, Any]:
-    parts = token.split(".")
-    if len(parts) < 2:
-        raise AssertionError("expected access token to be a JWT")
-    payload = parts[1] + "=" * (-len(parts[1]) % 4)
-    return json.loads(base64.urlsafe_b64decode(payload))
-
-
-def _sign_jwt(
-    private_key: RSAPrivateKey,
-    header: Mapping[str, Any],
-    payload: Mapping[str, Any],
-) -> str:
-    header_b64 = _b64u(
-        json.dumps(header, separators=(",", ":"), sort_keys=True).encode()
-    )
-    payload_b64 = _b64u(
-        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
-    )
-    signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
-    signature = private_key.sign(signing_input, padding.PKCS1v15(), hashes.SHA256())
-    return f"{header_b64}.{payload_b64}.{_b64u(signature)}"
-
-
-def time_now() -> int:
-    return int(time.time())
-
-
-@dataclass(frozen=True)
-class DPoPKey:
-    private_key: RSAPrivateKey
-    public_jwk: dict[str, str]
-
-    @classmethod
-    def generate(cls) -> DPoPKey:
-        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        public_numbers = private_key.public_key().public_numbers()
-        return cls(
-            private_key=private_key,
-            public_jwk={
-                "kty": "RSA",
-                "n": _b64u_int(public_numbers.n),
-                "e": _b64u_int(public_numbers.e),
-            },
-        )
-
-    @property
-    def thumbprint(self) -> str:
-        # RFC 7638 canonical member set for RSA public keys.
-        canonical = json.dumps(
-            {
-                "e": self.public_jwk["e"],
-                "kty": self.public_jwk["kty"],
-                "n": self.public_jwk["n"],
-            },
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode("ascii")
-        return _b64u(hashlib.sha256(canonical).digest())
-
-    @property
-    def public_pem(self) -> str:
-        return (
-            self.private_key.public_key()
-            .public_bytes(
-                serialization.Encoding.PEM,
-                serialization.PublicFormat.SubjectPublicKeyInfo,
-            )
-            .decode("ascii")
-        )
-
-    def sign(self, payload: Mapping[str, Any], typ: str = "JWT") -> str:
-        return _sign_jwt(
-            self.private_key,
-            {"alg": "RS256", "typ": typ},
-            payload,
-        )
-
-    def sign_dpop_proof(
-        self,
-        *,
-        htm: str,
-        htu: str,
-        access_token: str | None = None,
-        nonce: str | None = None,
-        jti: str | None = None,
-    ) -> str:
-        payload: dict[str, Any] = {
-            "htm": htm,
-            "htu": htu,
-            "iat": int(time_now()),
-            "jti": jti or str(uuid.uuid4()),
-        }
-        if access_token is not None:
-            payload["ath"] = _b64u(
-                hashlib.sha256(access_token.encode("ascii")).digest()
-            )
-        if nonce is not None:
-            payload["nonce"] = nonce
-        return _sign_jwt(
-            self.private_key,
-            {
-                "alg": "RS256",
-                "jwk": self.public_jwk,
-                "typ": "dpop+jwt",
-            },
-            payload,
-        )
-
-
-@dataclass(frozen=True)
-class DPoPAccessToken:
-    token: str
-    key: DPoPKey
 
 
 @dataclass(frozen=True)

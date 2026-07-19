@@ -1,0 +1,24 @@
+# AWS Cognito user pool. One-time setup: docs/idp-setup/cognito.md.
+# Client-credentials requires an app client with a secret plus a resource
+# server + custom scope. Tokens carry aud = app client id.
+name: cognito
+display_name: "AWS Cognito"
+tier: external
+owner: "@unassigned"
+# Not onboarded until a real user pool + IDP_COGNITO_* secrets exist (docs/idp-setup/cognito.md).
+onboarded: false
+issuer: "https://cognito-idp.${IDP_COGNITO_REGION}.amazonaws.com/${IDP_COGNITO_USER_POOL_ID}"
+audience: "${IDP_COGNITO_CLIENT_ID}"
+client_id: "${IDP_COGNITO_CLIENT_ID}"
+client_secret: "${IDP_COGNITO_CLIENT_SECRET}"
+token_endpoint_params:
+  scope: "opentdf/platform"
+capabilities:
+  dpop: false
+  custom_audience: false
+  configurable_token_lifetime: false
+ers:
+  mode: claims
+  required_claims: [sub]
+platform_overlay:
+  dpop_enforce: false

@@ -41,6 +41,7 @@ dependencies = [
     "pytest-html>=4.2.0",
     "pytest-xdist>=3.6.1",
     "pytest-metadata>=3.1.1",
+    "PyYAML>=6.0.3",
     "referencing>=0.37.0",
     "requests>=2.34.2",
     "rpds-py>=2026.5.1",
@@ -80,7 +81,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["abac", "tdfs", "otdfctl", "assertions", "fixtures"]
+known-first-party = ["abac", "tdfs", "otdfctl", "assertions", "fixtures", "idp"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -104,4 +105,5 @@ addopts = "-ra -v"
 markers = [
     "stage1: community Stage-1 basic Base TDF (tdf) roundtrip (community ↔ go)",
     "integration: requires a running platform",
+    "no_audit_logs: opt out of automatic KAS audit-log collection for a test or module",
 ]
