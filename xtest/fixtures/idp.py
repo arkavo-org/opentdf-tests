@@ -53,6 +53,20 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         metafunc.parametrize("idp", names, indirect=True, scope="session")
 
 
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    """Apply provider known_issues as non-strict xfail markers."""
+    callspec = getattr(item, "callspec", None)
+    if callspec is None or "idp" not in callspec.params:
+        return
+    resolved = load_provider(typing.cast(str, callspec.params["idp"]))
+    original = getattr(item, "originalname", None)
+    check = str(original if original else item.name).removeprefix("test_")
+    for known in resolved.provider.known_issues:
+        if known.check == check:
+            reason = known.reason + (f" ({known.issue})" if known.issue else "")
+            item.add_marker(pytest.mark.xfail(reason=reason, strict=False))
+
+
 class IdpSession:
     """Resolved provider config plus lazily-fetched OIDC artifacts, session-cached."""
 

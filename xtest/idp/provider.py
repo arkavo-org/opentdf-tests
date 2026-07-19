@@ -50,6 +50,18 @@ class PlatformOverlay(BaseModel):
     casbin_groups_claim: str | None = None
 
 
+class KnownIssue(BaseModel):
+    """A check expected to fail for a known upstream reason.
+
+    Applied as a non-strict xfail: the run stays green, the reason shows in
+    reports, and an unexpected pass (XPASS) signals the upstream fix landed.
+    """
+
+    check: str
+    reason: str
+    issue: str | None = None
+
+
 class IdpProvider(BaseModel):
     name: str
     display_name: str = ""
@@ -79,6 +91,7 @@ class IdpProvider(BaseModel):
     capabilities: Capabilities = Field(default_factory=Capabilities)
     ers: ErsConfig = Field(default_factory=ErsConfig)
     platform_overlay: PlatformOverlay = Field(default_factory=PlatformOverlay)
+    known_issues: list[KnownIssue] = Field(default_factory=list)
 
     def dpop_credentials(self) -> tuple[str, str]:
         return (

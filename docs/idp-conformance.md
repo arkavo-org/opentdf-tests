@@ -98,6 +98,7 @@ which skip the provider (or fail it under `--idp-strict`).
 | `platform_overlay.dpop_enforce` | Rendered into `server.auth.dpop.enforce` in the overlay. |
 | `platform_overlay.casbin_extension` | Extra casbin policy lines appended to the builtin policy (`server.auth.policy.extension`) — e.g. grant a token claim value the platform admin role. |
 | `platform_overlay.casbin_groups_claim` | Which token claim casbin reads group/role subjects from (`server.auth.policy.groups_claim`; platform default `realm_access.roles`). Auth0 uses `gty` (always `client-credentials` for M2M tokens) since its tokens carry no roles claim. |
+| `known_issues` | List of `{check, reason, issue}` — applied as non-strict xfail for documented upstream bugs (run stays green, reason shows in reports, an unexpected pass flags the fix landing). See auth0's `tdf_roundtrip` entry for the shape. |
 
 ### Adding a new provider
 

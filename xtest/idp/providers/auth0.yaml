@@ -35,3 +35,9 @@ platform_overlay:
   casbin_groups_claim: gty
   casbin_extension: |
     g, client-credentials, role:admin
+known_issues:
+  # The go SDK attaches an RS256 DPoP proof to every token request (no
+  # opt-out); Auth0 rejects it (invalid_dpop_proof, alg not allowed).
+  - check: tdf_roundtrip
+    reason: "go SDK sends an RS256 DPoP proof at token acquisition; Auth0 rejects it"
+    issue: "https://github.com/arkavo-org/platform/issues/2"
