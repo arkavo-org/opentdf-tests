@@ -12,6 +12,11 @@
 # Swift stays on macOS (CryptoKit). macOS platform is native Postgres+Keycloak+go
 # (no Docker/Colima). Defaults float on `latest` release tags.
 #
+# Stage-1 jobs also run dormant feature lanes (test_dpop.py everywhere;
+# test_pqc.py on ubuntu, where a km1 key-management KAS is started). Cases
+# skip until an SDK claims the feature via `cli.sh supports`; results feed
+# the Feature conformance table on the Pages report.
+#
 # Does NOT expand the official xtest.yml matrix.
 name: Community X-Test
 
@@ -70,6 +75,11 @@ on:
         type: string
         default: latest
         description: "otdfctl / go peer ref: 'latest'/'lts', branch, tag, or SHA"
+      dpop-challenge:
+        required: false
+        type: boolean
+        default: false
+        description: "Enable DPoP nonce challenge (require_nonce) on ubuntu KAS instances"
 
 # One run per branch: push + PR + workflow_dispatch share the same group so a
 # new commit cancels both the prior push run and the prior PR run (avoids
@@ -248,13 +258,14 @@ jobs:
 
       - name: Start platform with containers
         id: run-platform
-        uses: opentdf/platform/test/start-up-with-containers@11af44a5d4826ed281bf2e0e4e31d6ff6154b393
+        uses: opentdf/platform/test/start-up-with-containers@6dd5f649347fb2314c6090ea6d090a5c673d58a6 # ci-startup-yaml-fix (opentdf/platform#3750)
         with:
           platform-ref: ${{ env.PLATFORM_REF }}
           ec-tdf-enabled: true
           extra-keys: ${{ steps.load-extra-keys.outputs.EXTRA_KEYS }}
           log-type: json
           pqc-enabled: true
+          dpop-challenge-enabled: ${{ inputs.dpop-challenge || false }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
@@ -343,6 +354,36 @@ jobs:
             echo "PLATFORM_VERSION=${PLATFORM_TAG}" >> "$GITHUB_ENV"
           fi
 
+      # km1 (key-management KAS) hosts the PQ/T keys used by test_pqc.py.
+      - name: Detect key-management support + root key
+        id: km-check
+        working-directory: ${{ steps.run-platform.outputs.platform-working-dir }}
+        run: |-
+          OT_CONFIG_FILE="$(pwd)/opentdf.yaml"
+          km_value=$(yq e '.services.kas.preview.key_management' "$OT_CONFIG_FILE" 2>/dev/null || echo "null")
+          case "$km_value" in
+            true|false) echo "supported=$km_value" >> "$GITHUB_OUTPUT" ;;
+            *) echo "supported=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+          existing_root_key=$(yq e '.services.kas.root_key' "$OT_CONFIG_FILE" 2>/dev/null || echo "")
+          if [ -n "$existing_root_key" ] && [ "$existing_root_key" != "null" ]; then
+            echo "root_key=$existing_root_key" >> "$GITHUB_OUTPUT"
+          else
+            echo "root_key=$(openssl rand -hex 32)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Start key-management KAS (km1)
+        id: kas-km1
+        uses: opentdf/platform/test/start-additional-kas@6dd5f649347fb2314c6090ea6d090a5c673d58a6 # ci-startup-yaml-fix (opentdf/platform#3750)
+        with:
+          ec-tdf-enabled: true
+          key-management: ${{ steps.km-check.outputs.supported }}
+          kas-name: km1
+          log-type: json
+          pqc-enabled: true
+          root-key: ${{ steps.km-check.outputs.root_key }}
+          dpop-challenge-enabled: ${{ inputs.dpop-challenge || false }}
+
       - name: Install xtest deps
         run: uv sync
         working-directory: otdftests/xtest
@@ -354,6 +395,7 @@ jobs:
           PLATFORM_LOG_FILE: "../../${{ steps.run-platform.outputs.platform-log-file }}"
           PLATFORM_TAG: ${{ env.PLATFORM_TAG }}
           SCHEMA_FILE: "manifest.schema.json"
+          OTDFCTL_HEADS: ${{ steps.configure-go.outputs.heads }}
           # Dist channel stays `main` (single under-test build); peer is go@GO_CHANNEL.
         run: |-
           set -o pipefail
@@ -371,6 +413,34 @@ jobs:
             -ra -v \
             test_tdfs.py \
             | tee test-results/community-python-stage1.log
+
+      # Dormant feature lanes (DPoP + PQ/T KEM): every case skips until the
+      # SDK's cli.sh claims the feature; results feed the Pages feature table.
+      - name: Run feature tests (DPoP + PQ/T KEM)
+        working-directory: otdftests/xtest
+        env:
+          PLATFORM_DIR: "../../${{ steps.run-platform.outputs.platform-working-dir }}"
+          PLATFORM_LOG_FILE: "../../${{ steps.run-platform.outputs.platform-log-file }}"
+          PLATFORM_TAG: ${{ env.PLATFORM_TAG }}
+          SCHEMA_FILE: "manifest.schema.json"
+          OTDFCTL_HEADS: ${{ steps.configure-go.outputs.heads }}
+          OT_ROOT_KEY: ${{ steps.km-check.outputs.root_key }}
+          KAS_KM1_LOG_FILE: "../../${{ steps.kas-km1.outputs.log-file }}"
+        run: |-
+          set -o pipefail
+          mkdir -p test-results
+          GO_CH="${GO_CHANNEL}"
+          uv run pytest -n auto --dist loadscope \
+            --html=test-results/community-python-features.html \
+            --self-contained-html \
+            --junitxml=test-results/community-python-features.junit.xml \
+            --sdks-encrypt "python@main go@${GO_CH}" \
+            --sdks-decrypt "python@main go@${GO_CH}" \
+            --containers tdf \
+            --focus python \
+            -ra -v \
+            test_dpop.py test_pqc.py \
+            | tee test-results/community-python-features.log
 
       - name: Export capability snapshot
         if: success() || failure()
@@ -434,13 +504,14 @@ jobs:
         run: echo "EXTRA_KEYS=$(jq -c <otdftests/xtest/extra-keys.json)" >> "${GITHUB_OUTPUT}"
 
       - id: run-platform
-        uses: opentdf/platform/test/start-up-with-containers@11af44a5d4826ed281bf2e0e4e31d6ff6154b393
+        uses: opentdf/platform/test/start-up-with-containers@6dd5f649347fb2314c6090ea6d090a5c673d58a6 # ci-startup-yaml-fix (opentdf/platform#3750)
         with:
           platform-ref: ${{ env.PLATFORM_REF }}
           ec-tdf-enabled: true
           extra-keys: ${{ steps.load-extra-keys.outputs.EXTRA_KEYS }}
           log-type: json
           pqc-enabled: true
+          dpop-challenge-enabled: ${{ inputs.dpop-challenge || false }}
 
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
       - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
@@ -510,6 +581,36 @@ jobs:
             echo "PLATFORM_VERSION=${PLATFORM_TAG}" >> "$GITHUB_ENV"
           fi
 
+      # km1 (key-management KAS) hosts the PQ/T keys used by test_pqc.py.
+      - name: Detect key-management support + root key
+        id: km-check
+        working-directory: ${{ steps.run-platform.outputs.platform-working-dir }}
+        run: |-
+          OT_CONFIG_FILE="$(pwd)/opentdf.yaml"
+          km_value=$(yq e '.services.kas.preview.key_management' "$OT_CONFIG_FILE" 2>/dev/null || echo "null")
+          case "$km_value" in
+            true|false) echo "supported=$km_value" >> "$GITHUB_OUTPUT" ;;
+            *) echo "supported=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+          existing_root_key=$(yq e '.services.kas.root_key' "$OT_CONFIG_FILE" 2>/dev/null || echo "")
+          if [ -n "$existing_root_key" ] && [ "$existing_root_key" != "null" ]; then
+            echo "root_key=$existing_root_key" >> "$GITHUB_OUTPUT"
+          else
+            echo "root_key=$(openssl rand -hex 32)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Start key-management KAS (km1)
+        id: kas-km1
+        uses: opentdf/platform/test/start-additional-kas@6dd5f649347fb2314c6090ea6d090a5c673d58a6 # ci-startup-yaml-fix (opentdf/platform#3750)
+        with:
+          ec-tdf-enabled: true
+          key-management: ${{ steps.km-check.outputs.supported }}
+          kas-name: km1
+          log-type: json
+          pqc-enabled: true
+          root-key: ${{ steps.km-check.outputs.root_key }}
+          dpop-challenge-enabled: ${{ inputs.dpop-challenge || false }}
+
       - run: uv sync
         working-directory: otdftests/xtest
 
@@ -520,6 +621,7 @@ jobs:
           PLATFORM_LOG_FILE: "../../${{ steps.run-platform.outputs.platform-log-file }}"
           PLATFORM_TAG: ${{ env.PLATFORM_TAG }}
           SCHEMA_FILE: "manifest.schema.json"
+          OTDFCTL_HEADS: ${{ steps.configure-go.outputs.heads }}
         run: |-
           mkdir -p test-results
           GO_CH="${GO_CHANNEL}"
@@ -534,6 +636,34 @@ jobs:
             -m stage1 \
             -ra -v \
             test_tdfs.py
+
+      # Dormant feature lanes (DPoP + PQ/T KEM): every case skips until the
+      # SDK's cli.sh claims the feature; results feed the Pages feature table.
+      - name: Run feature tests (DPoP + PQ/T KEM)
+        working-directory: otdftests/xtest
+        env:
+          PLATFORM_DIR: "../../${{ steps.run-platform.outputs.platform-working-dir }}"
+          PLATFORM_LOG_FILE: "../../${{ steps.run-platform.outputs.platform-log-file }}"
+          PLATFORM_TAG: ${{ env.PLATFORM_TAG }}
+          SCHEMA_FILE: "manifest.schema.json"
+          OTDFCTL_HEADS: ${{ steps.configure-go.outputs.heads }}
+          OT_ROOT_KEY: ${{ steps.km-check.outputs.root_key }}
+          KAS_KM1_LOG_FILE: "../../${{ steps.kas-km1.outputs.log-file }}"
+        run: |-
+          set -o pipefail
+          mkdir -p test-results
+          GO_CH="${GO_CHANNEL}"
+          uv run pytest -n auto --dist loadscope \
+            --html=test-results/community-rust-features.html \
+            --self-contained-html \
+            --junitxml=test-results/community-rust-features.junit.xml \
+            --sdks-encrypt "rust@main go@${GO_CH}" \
+            --sdks-decrypt "rust@main go@${GO_CH}" \
+            --containers tdf \
+            --focus rust \
+            -ra -v \
+            test_dpop.py test_pqc.py \
+            | tee test-results/community-rust-features.log
 
       - name: Export capability snapshot
         if: success() || failure()
@@ -670,6 +800,7 @@ jobs:
           PLATFORM_LOG_FILE: "../../${{ steps.run-platform.outputs.platform-log-file }}"
           PLATFORM_TAG: ${{ env.PLATFORM_TAG }}
           SCHEMA_FILE: "manifest.schema.json"
+          OTDFCTL_HEADS: ${{ steps.configure-go.outputs.heads }}
         run: |-
           mkdir -p test-results
           GO_CH="${GO_CHANNEL}"
@@ -684,6 +815,32 @@ jobs:
             -m stage1 \
             -ra -v \
             test_tdfs.py
+
+      # Dormant DPoP lane: skips until OpenTDFKit claims `supports dpop`.
+      # PQ/T KEM lanes stay on ubuntu — km1 needs the containers-based action.
+      - name: Run feature tests (DPoP)
+        working-directory: otdftests/xtest
+        env:
+          PLATFORM_DIR: "../../${{ steps.run-platform.outputs.platform-working-dir }}"
+          PLATFORM_LOG_FILE: "../../${{ steps.run-platform.outputs.platform-log-file }}"
+          PLATFORM_TAG: ${{ env.PLATFORM_TAG }}
+          SCHEMA_FILE: "manifest.schema.json"
+          OTDFCTL_HEADS: ${{ steps.configure-go.outputs.heads }}
+        run: |-
+          set -o pipefail
+          mkdir -p test-results
+          GO_CH="${GO_CHANNEL}"
+          uv run pytest -n auto --dist loadscope \
+            --html=test-results/community-swift-features.html \
+            --self-contained-html \
+            --junitxml=test-results/community-swift-features.junit.xml \
+            --sdks-encrypt "swift@main go@${GO_CH}" \
+            --sdks-decrypt "swift@main go@${GO_CH}" \
+            --containers tdf \
+            --focus swift \
+            -ra -v \
+            test_dpop.py \
+            | tee test-results/community-swift-features.log
 
       - name: Export capability snapshot
         if: success() || failure()
@@ -730,13 +887,14 @@ jobs:
         run: echo "EXTRA_KEYS=$(jq -c <otdftests/xtest/extra-keys.json)" >> "${GITHUB_OUTPUT}"
 
       - id: run-platform
-        uses: opentdf/platform/test/start-up-with-containers@11af44a5d4826ed281bf2e0e4e31d6ff6154b393
+        uses: opentdf/platform/test/start-up-with-containers@6dd5f649347fb2314c6090ea6d090a5c673d58a6 # ci-startup-yaml-fix (opentdf/platform#3750)
         with:
           platform-ref: ${{ env.PLATFORM_REF }}
           ec-tdf-enabled: true
           extra-keys: ${{ steps.load-extra-keys.outputs.EXTRA_KEYS }}
           log-type: json
           pqc-enabled: true
+          dpop-challenge-enabled: ${{ inputs.dpop-challenge || false }}
 
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
       - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
@@ -823,6 +981,7 @@ jobs:
           PLATFORM_LOG_FILE: "../../${{ steps.run-platform.outputs.platform-log-file }}"
           PLATFORM_TAG: ${{ env.PLATFORM_TAG }}
           SCHEMA_FILE: "manifest.schema.json"
+          OTDFCTL_HEADS: ${{ steps.configure-go.outputs.heads }}
         run: |-
           set -o pipefail
           mkdir -p test-results
@@ -981,6 +1140,7 @@ jobs:
           PLATFORM_LOG_FILE: "../../${{ steps.run-platform.outputs.platform-log-file }}"
           PLATFORM_TAG: ${{ env.PLATFORM_TAG }}
           SCHEMA_FILE: "manifest.schema.json"
+          OTDFCTL_HEADS: ${{ steps.configure-go.outputs.heads }}
         run: |-
           set -o pipefail
           mkdir -p test-results
