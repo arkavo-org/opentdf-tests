@@ -1,0 +1,21 @@
+# Okta developer-edition tenant. One-time setup: docs/idp-setup/okta.md.
+# Use a custom authorization server so the audience is configurable; the
+# org AS only issues aud=api://default.
+name: okta
+display_name: "Okta"
+tier: external
+owner: "@unassigned"
+issuer: "https://YOUR_DOMAIN.okta.com/oauth2/default"
+audience: "http://localhost:8080"
+client_id: "${IDP_OKTA_CLIENT_ID}"
+client_secret: "${IDP_OKTA_CLIENT_SECRET}"
+token_endpoint_params: {}
+capabilities:
+  dpop: # unknown — set true/false after the first run against a real tenant
+  custom_audience: false
+  configurable_token_lifetime: true # access-token lifetime per auth-server rule
+ers:
+  mode: claims
+  required_claims: [sub]
+platform_overlay:
+  dpop_enforce: false

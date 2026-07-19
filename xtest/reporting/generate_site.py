@@ -12,6 +12,11 @@ Every junit testcase id encodes the encrypt/decrypt pair
 (``test_tdf_roundtrip[small-python@main-go@v0.35.0-...]``), which is what
 the interop matrix is built from.
 
+Files named ``idp-conformance-*.junit.xml`` (uploaded by the IdP
+Conformance workflow) are reported separately as a provider × check
+matrix; their testcase ids look like ``test_discovery_document[keycloak]``
+or ``test_tdf_roundtrip[keycloak-small]``.
+
 Outputs index.html (self-contained, no external assets) and summary.json.
 """
 
@@ -56,6 +61,36 @@ _FEATURE_AREAS = {
     "test_pqc": "Post-quantum KEM (ML-KEM / X-Wing)",
 }
 
+# IdP conformance results (idp-conformance-<provider>.junit.xml) are matched
+# by filename and reported separately from the SDK matrices. Testcase ids are
+# ``test_<check>[<provider>]`` with an optional -small/-large size suffix on
+# the provider param (e.g. ``test_tdf_roundtrip[keycloak-small]``).
+_IDP_FILE_PREFIX = "idp-conformance-"
+_IDP_FILE_SUFFIX = ".junit.xml"
+_IDP_CASE_RE = re.compile(r"(?P<check>test_\w+)\[(?P<param>[^\]]+)\]$")
+_IDP_SIZE_SUFFIX_RE = re.compile(r"-(?:small|large)$")
+
+# Preferred column order for the IdP matrix; checks present in the data but
+# not listed here are appended alphabetically so new checks show up on their
+# own.
+_IDP_CHECK_ORDER = (
+    "discovery_document",
+    "jwks_fetch",
+    "client_credentials_token",
+    "platform_accepts_provider_token",
+    "ers_resolves_entity",
+    "dpop_proof_of_possession",
+    "wrong_audience_rejected",
+    "tampered_signature_rejected",
+    "unknown_signer_rejected",
+    "expired_token_rejected",
+    "tdf_roundtrip",
+)
+
+# When size variants of one check merge (e.g. tdf_roundtrip[keycloak-small]
+# and [keycloak-large]), the worse outcome wins.
+_IDP_STATUS_RANK = {"skipped": 0, "passed": 1, "failed": 2}
+
 
 @dataclass
 class Counts:
@@ -89,6 +124,23 @@ class Counts:
 
 
 @dataclass
+class IdpCheck:
+    """One provider × check cell: worst outcome plus any skip reason."""
+
+    status: str  # passed | failed | skipped
+    reason: str | None = None
+
+    def merge(self, status: str, reason: str | None) -> None:
+        if _IDP_STATUS_RANK[status] > _IDP_STATUS_RANK[self.status]:
+            self.status = status
+            self.reason = None
+        if self.status == "skipped" and reason:
+            reasons = self.reason.split("; ") if self.reason else []
+            if reason not in reasons:
+                self.reason = "; ".join([*reasons, reason])
+
+
+@dataclass
 class Report:
     """Aggregated results across every artifact directory."""
 
@@ -98,6 +150,9 @@ class Report:
     sdk_counts: dict[str, Counts] = field(default_factory=lambda: defaultdict(Counts))
     feature_counts: dict[str, dict[str, Counts]] = field(
         default_factory=lambda: defaultdict(lambda: defaultdict(Counts))
+    )
+    idp_checks: dict[str, dict[str, IdpCheck]] = field(
+        default_factory=lambda: defaultdict(dict)
     )
     snapshots: dict[str, dict] = field(default_factory=dict)
     junit_files: int = 0
@@ -112,6 +167,36 @@ def _testcase_outcome(case: ET.Element) -> str:
     return "passed"
 
 
+def _collect_idp_case(
+    report: Report, junit: Path, case: ET.Element, outcome: str
+) -> None:
+    """Fold one IdP conformance testcase into the provider × check matrix."""
+    name = case.attrib.get("name", "")
+    match = _IDP_CASE_RE.search(name)
+    if match:
+        check = match.group("check").removeprefix("test_")
+        provider = _IDP_SIZE_SUFFIX_RE.sub("", match.group("param"))
+    else:
+        # Unparametrized case: fall back to the artifact's provider.
+        check = name.removeprefix("test_")
+        provider = junit.name[len(_IDP_FILE_PREFIX) : -len(_IDP_FILE_SUFFIX)]
+    if not provider or not check:
+        return
+    reason = None
+    if outcome == "skipped":
+        for child in case:
+            if child.tag == "skipped":
+                reason = (
+                    child.attrib.get("message") or (child.text or "").strip() or None
+                )
+    checks = report.idp_checks[provider]
+    current = checks.get(check)
+    if current is None:
+        checks[check] = IdpCheck(outcome, reason if outcome == "skipped" else None)
+    else:
+        current.merge(outcome, reason)
+
+
 def collect(input_dir: Path) -> Report:
     report = Report()
     for junit in sorted(input_dir.rglob("*.junit.xml")):
@@ -123,8 +208,14 @@ def collect(input_dir: Path) -> Report:
         if root is None:
             continue
         report.junit_files += 1
+        is_idp = junit.name.startswith(_IDP_FILE_PREFIX) and junit.name.endswith(
+            _IDP_FILE_SUFFIX
+        )
         for case in root.iter("testcase"):
             outcome = _testcase_outcome(case)
+            if is_idp:
+                _collect_idp_case(report, junit, case, outcome)
+                continue
             peers = _PEER_RE.findall(case.attrib.get("name", ""))
             module = case.attrib.get("classname", "").rsplit(".", 1)[-1]
             area = _FEATURE_AREAS.get(module)
@@ -404,6 +495,52 @@ def _render_capabilities(report: Report) -> str:
 """
 
 
+def _ordered_idp_checks(report: Report) -> list[str]:
+    seen = {check for checks in report.idp_checks.values() for check in checks}
+    ordered = [c for c in _IDP_CHECK_ORDER if c in seen]
+    return ordered + sorted(seen - set(_IDP_CHECK_ORDER))
+
+
+def _idp_cell(result: IdpCheck | None) -> str:
+    if result is None:
+        return '<td class="blank" title="check not run for this provider">·</td>'
+    if result.status == "passed":
+        return '<td class="ok" title="passed">✓</td>'
+    if result.status == "failed":
+        return '<td class="fail" title="failed">✕</td>'
+    if not result.reason:
+        return '<td class="skip" title="skipped">—</td>'
+    short = result.reason if len(result.reason) <= 40 else f"{result.reason[:39]}…"
+    return f'<td class="skip" title="{_esc(result.reason)}">— {_esc(short)}</td>'
+
+
+def _render_idp(report: Report) -> str:
+    # One row per provider seen in idp-conformance-*.junit.xml artifacts; the
+    # section is omitted entirely when no such artifacts were downloaded.
+    if not report.idp_checks:
+        return ""
+    checks = _ordered_idp_checks(report)
+    head = "".join(f'<th class="peer">{_esc(c)}</th>' for c in checks)
+    rows = []
+    for provider in sorted(report.idp_checks):
+        cells = "".join(_idp_cell(report.idp_checks[provider].get(c)) for c in checks)
+        rows.append(f'<tr><td class="feature">{_esc(provider)}</td>{cells}</tr>')
+    return f"""
+  <h2 id="idp-conformance">IdP conformance</h2>
+  <p class="section-note">Black-box OIDC checks from the IdP Conformance
+  workflow (<code>test_idp_conformance.py</code>), one row per provider. A
+  skipped cell means the check cannot run against that provider — the reason
+  (capability gap or missing tenant secrets) is shown inline and in full on
+  hover.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>provider</th>{head}</tr></thead>
+    <tbody>{"".join(rows)}</tbody>
+  </table></div>
+  <p class="legend"><span>✓ check passed</span><span>✕ check failed</span>
+  <span>— skipped (reason shown)</span><span>· check not run</span></p>
+"""
+
+
 def _render_provenance(report: Report, generated: str) -> str:
     any_snap = next(iter(report.snapshots.values()), {})
     run_id = os.environ.get("SOURCE_RUN_ID") or any_snap.get("run_id")
@@ -443,9 +580,10 @@ def render_html(report: Report, generated: str) -> str:
             + _render_matrix(report)
             + _render_features(report)
             + _render_capabilities(report)
+            + _render_idp(report)
         )
     else:
-        body = _render_empty()
+        body = _render_idp(report) or _render_empty()
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -488,7 +626,7 @@ def generate(input_dir: Path, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "index.html").write_text(render_html(report, generated))
 
-    summary = {
+    summary: dict[str, object] = {
         "generated_at": generated,
         "source_run_id": os.environ.get("SOURCE_RUN_ID"),
         "junit_files": report.junit_files,
@@ -512,11 +650,27 @@ def generate(input_dir: Path, output_dir: Path) -> None:
             for sdk, counts in sorted(sdks.items())
         ],
     }
+    if report.idp_checks:
+        providers: dict[str, object] = {}
+        for provider in sorted(report.idp_checks):
+            checks = report.idp_checks[provider]
+            providers[provider] = {
+                "checks": {
+                    check: {
+                        "status": checks[check].status,
+                        "reason": checks[check].reason,
+                    }
+                    for check in _ordered_idp_checks(report)
+                    if check in checks
+                }
+            }
+        summary["idp_conformance"] = {"providers": providers}
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2))
+    idp_note = f", {len(report.idp_checks)} IdP providers" if report.idp_checks else ""
     print(
         f"Wrote {output_dir / 'index.html'} "
         f"({report.junit_files} junit files, {len(report.snapshots)} snapshots, "
-        f"{len(report.pair_counts)} interop pairs)"
+        f"{len(report.pair_counts)} interop pairs{idp_note})"
     )
 
 

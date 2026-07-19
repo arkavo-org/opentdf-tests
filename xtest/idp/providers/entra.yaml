@@ -1,0 +1,25 @@
+# Microsoft Entra ID tenant. One-time setup: docs/idp-setup/entra.md.
+# Requires an app registration for the platform (audience) plus a
+# confidential client app registration with an app role / .default scope.
+name: entra
+display_name: "Microsoft Entra ID"
+tier: external
+owner: "@unassigned"
+issuer: "https://login.microsoftonline.com/${IDP_ENTRA_TENANT_ID}/v2.0"
+# App ID URI (or app client ID) of the "OpenTDF platform" app registration.
+audience: "${IDP_ENTRA_AUDIENCE}"
+client_id: "${IDP_ENTRA_CLIENT_ID}"
+client_secret: "${IDP_ENTRA_CLIENT_SECRET}"
+token_endpoint_params:
+  # Entra client-credentials requires a .default scope on the target resource.
+  scope: "${IDP_ENTRA_AUDIENCE}/.default"
+capabilities:
+  dpop: false
+  # Request the .default scope of a second app registration instead.
+  custom_audience: true
+  configurable_token_lifetime: false
+ers:
+  mode: claims
+  required_claims: [sub]
+platform_overlay:
+  dpop_enforce: false

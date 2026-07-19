@@ -15,15 +15,16 @@ fixture system.
 
 | Path | Contents |
 |------|----------|
-| `test_*.py` | Test modules. One per concern: `test_tdfs.py` (core roundtrip), `test_abac.py` (ABAC), `test_legacy.py` (golden TDFs), `test_policytypes.py`, `test_self.py`, `test_audit_logs.py`, `test_pqc.py`. |
+| `test_*.py` | Test modules. One per concern: `test_tdfs.py` (core roundtrip), `test_abac.py` (ABAC), `test_legacy.py` (golden TDFs), `test_policytypes.py`, `test_self.py`, `test_audit_logs.py`, `test_pqc.py`, `test_dpop.py`, `test_idp_conformance.py` (black-box IdP checks — `../docs/idp-conformance.md`). |
 | `conftest.py` | `pytest_addoption` + the encrypt/decrypt SDK parametrization. Defines `--sdks`, `--sdks-encrypt`, `--sdks-decrypt`, `--containers`, `--no-audit-logs`. |
-| `fixtures/` | Module-scoped pytest fixtures: `attributes.py`, `keys.py`, `audit.py`, `assertions.py`, `kas.py`, `encryption.py`, `obligations.py`. |
+| `fixtures/` | Module-scoped pytest fixtures: `attributes.py`, `keys.py`, `audit.py`, `assertions.py`, `kas.py`, `encryption.py`, `obligations.py`, `idp.py` (IdP provider parametrization + options). |
+| `idp/` | IdP conformance helpers: `providers/*.yaml` (per-provider configs), `provider.py` (schema + `${VAR}` interpolation), `oidc.py` (discovery/JWKS/token client), `dpop.py` (shared with `test_dpop.py`), `platform_config.py` (platform overlay renderer). |
 | `tdfs.py` | SDK abstraction layer — wraps the `cli.sh` shims under `sdk/<lang>/dist/<version>/`. |
 | `sdk/{go,java,js}/dist/<version>/` | Official SDK CLI builds. Installed by `otdf-sdk-mgr install`. |
 | `sdk/{python,rust,swift}/dist/<version>/` | Community SDK CLI builds (`make -C sdk/python`, etc.). |
 | `test.env` | Default endpoint and client-credential env vars. Source with `set -a && source test.env && set +a`. |
 
-## Custom pytest Options (defined in `conftest.py`)
+## Custom pytest Options (defined in `conftest.py`; IdP options in `fixtures/idp.py`)
 
 | Option | Purpose |
 |--------|---------|
@@ -31,6 +32,8 @@ fixture system.
 | `--sdks-encrypt`, `--sdks-decrypt` | Asymmetric encrypt/decrypt SDK selection (use when reproducing cross-SDK interop bugs). |
 | `--containers tdf tdf-ecwrap` | Which format profiles to exercise (Base TDF; aliases: `ztdf`→`tdf`). See `docs/FORMATS.md`. |
 | `--no-audit-logs` | Skip audit-log assertions for this run. CLI equivalent of `DISABLE_AUDIT_ASSERTIONS=1`. |
+| `--idp-providers "keycloak auth0"` | Which IdP providers (`idp/providers/*.yaml`) to parametrize `test_idp_conformance.py` with. Default: `keycloak`. |
+| `--idp-strict` | Fail (not skip) on missing provider secrets or a platform/issuer mismatch. Nightly CI uses this. |
 
 ## Authoring a New Test
 

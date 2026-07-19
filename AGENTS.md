@@ -12,6 +12,7 @@ This guide provides essential knowledge for AI agents performing updates, refact
 | `vulnerability/` | Playwright UI test suite (run with `npx playwright test`) | no |
 | `platform/` | Platform service source — **installed by `otdf-sdk-mgr install platform`**, not committed. Edits here may be wiped by a reinstall. |  |
 | `xtest/sdk/{go,java,js}/dist/` | Built SDK CLI wrappers, produced by `otdf-sdk-mgr install` (or by `cd xtest/sdk && make` for source builds) |  |
+| `xtest/idp/` | IdP conformance helpers: provider configs (`providers/*.yaml`), OIDC/DPoP clients, platform overlay renderer. Docs: `docs/idp-conformance.md` |  |
 
 ## Test Framework Overview
 
@@ -45,6 +46,19 @@ uv run pytest test_tdfs.py --sdks go -v
 
 # Run specific test
 uv run pytest test_tdfs.py::test_tdf_roundtrip --sdks go -v
+```
+
+### IdP Conformance Suite
+
+Black-box OIDC provider checks (`xtest/test_idp_conformance.py`, providers in
+`xtest/idp/providers/`, CI in `.github/workflows/idp-conformance.yml`). Full
+docs: `docs/idp-conformance.md`. SDKs follow the platform's `platform_issuer`
+from the well-known, so only the platform config changes per provider
+(`uv run python -m idp.platform_config`).
+
+```bash
+cd xtest && uv run pytest test_idp_conformance.py -v            # local Keycloak (default)
+uv run pytest test_idp_conformance.py --idp-providers auth0 -v  # external (re-point platform first)
 ```
 
 ### Custom pytest Options and Env Vars

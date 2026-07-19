@@ -1,0 +1,27 @@
+# Auth0 free-tier tenant (pilot external provider).
+# One-time setup: docs/idp-setup/auth0.md. Requires a Machine-to-Machine
+# application authorized on an API whose identifier matches `audience` below.
+name: auth0
+display_name: "Auth0"
+tier: external
+owner: "@unassigned"
+# Auth0 issuers end with a trailing slash, and the platform compares issuer
+# strings exactly — keep the slash.
+issuer: "https://YOUR_TENANT.us.auth0.com/"
+audience: "http://localhost:8080"
+client_id: "${IDP_AUTH0_CLIENT_ID}"
+client_secret: "${IDP_AUTH0_CLIENT_SECRET}"
+token_endpoint_params:
+  # Auth0 only mints JWT access tokens when an API audience is requested.
+  audience: "http://localhost:8080"
+# Second registered API identifier, used by the wrong-audience negative test.
+wrong_audience: "https://idp-conformance.invalid/"
+capabilities:
+  dpop: # unknown — set true/false after the first run against a real tenant
+  custom_audience: true
+  configurable_token_lifetime: true # per-API token lifetime
+ers:
+  mode: claims
+  required_claims: [sub]
+platform_overlay:
+  dpop_enforce: false

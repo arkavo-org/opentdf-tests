@@ -1,0 +1,22 @@
+# Google — STUB. Google does not support the OAuth client-credentials grant
+# for user-less OIDC; service accounts use the JWT-bearer grant instead.
+# This file tracks the gap: the suite skips the provider until a supported
+# grant mechanism (or a jwt-bearer extension to idp/oidc.py) lands.
+name: google
+display_name: "Google (stub — no client-credentials grant)"
+tier: external
+owner: "@unassigned"
+issuer: "https://accounts.google.com"
+audience: "${IDP_GOOGLE_AUDIENCE}"
+client_id: "${IDP_GOOGLE_CLIENT_ID}"
+client_secret: "${IDP_GOOGLE_CLIENT_SECRET}"
+token_endpoint_params: {}
+capabilities:
+  dpop: false
+  custom_audience: false
+  configurable_token_lifetime: false
+ers:
+  mode: claims
+  required_claims: [sub]
+platform_overlay:
+  dpop_enforce: false
