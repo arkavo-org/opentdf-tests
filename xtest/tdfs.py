@@ -762,8 +762,8 @@ def skip_connectrpc_skew(encrypt_sdk: SDK, decrypt_sdk: SDK, pfs: PlatformFeatur
 
 
 def _parse_semver(version: str) -> tuple[int, int, int] | None:
-    """Parse a version string (with optional 'v' prefix) into (major, minor, patch)."""
-    m = _version_re.match(version.lstrip("v"))
+    """Parse a version string (optional 'sdk/' and/or 'v' prefix) into (major, minor, patch)."""
+    m = _version_re.match(re.sub(r"^(?:sdk/)?v?", "", version))
     if not m:
         return None
     return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
