@@ -128,7 +128,7 @@ jobs:
             [ -f "$f" ] || { echo "unknown provider: $n" >&2; exit 1; }
             tier=$(grep -E '^tier:' "$f" | awk '{print $2}')
             [ -n "$tier" ] || { echo "provider $n has no tier" >&2; exit 1; }
-            onboarded=$(grep -E '^onboarded:' "$f" | awk '{print $2}')
+            onboarded=$(grep -E '^onboarded:' "$f" | awk '{print $2}' || true)
             if [ "$tier" = "external" ] && [ "$onboarded" = "false" ]; then
               echo "excluding $n (external, onboarded=false)" >&2
               continue
