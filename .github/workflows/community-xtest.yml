@@ -360,9 +360,11 @@ jobs:
         working-directory: ${{ steps.run-platform.outputs.platform-working-dir }}
         run: |-
           OT_CONFIG_FILE="$(pwd)/opentdf.yaml"
+          # Field declared at all (true or false) means this platform build
+          # understands the key_management preview flag → start km1 with it.
           km_value=$(yq e '.services.kas.preview.key_management' "$OT_CONFIG_FILE" 2>/dev/null || echo "null")
           case "$km_value" in
-            true|false) echo "supported=$km_value" >> "$GITHUB_OUTPUT" ;;
+            true|false) echo "supported=true" >> "$GITHUB_OUTPUT" ;;
             *) echo "supported=false" >> "$GITHUB_OUTPUT" ;;
           esac
           existing_root_key=$(yq e '.services.kas.root_key' "$OT_CONFIG_FILE" 2>/dev/null || echo "")
@@ -379,6 +381,7 @@ jobs:
           ec-tdf-enabled: true
           key-management: ${{ steps.km-check.outputs.supported }}
           kas-name: km1
+          kas-port: 8585
           log-type: json
           pqc-enabled: true
           root-key: ${{ steps.km-check.outputs.root_key }}
@@ -587,9 +590,11 @@ jobs:
         working-directory: ${{ steps.run-platform.outputs.platform-working-dir }}
         run: |-
           OT_CONFIG_FILE="$(pwd)/opentdf.yaml"
+          # Field declared at all (true or false) means this platform build
+          # understands the key_management preview flag → start km1 with it.
           km_value=$(yq e '.services.kas.preview.key_management' "$OT_CONFIG_FILE" 2>/dev/null || echo "null")
           case "$km_value" in
-            true|false) echo "supported=$km_value" >> "$GITHUB_OUTPUT" ;;
+            true|false) echo "supported=true" >> "$GITHUB_OUTPUT" ;;
             *) echo "supported=false" >> "$GITHUB_OUTPUT" ;;
           esac
           existing_root_key=$(yq e '.services.kas.root_key' "$OT_CONFIG_FILE" 2>/dev/null || echo "")
@@ -606,6 +611,7 @@ jobs:
           ec-tdf-enabled: true
           key-management: ${{ steps.km-check.outputs.supported }}
           kas-name: km1
+          kas-port: 8585
           log-type: json
           pqc-enabled: true
           root-key: ${{ steps.km-check.outputs.root_key }}

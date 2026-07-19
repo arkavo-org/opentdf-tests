@@ -263,9 +263,7 @@ def _resolve_against(
             # Tag-level or worse with no unique winner is genuinely ambiguous
             # (e.g. two release tags on one commit): fail loudly rather than
             # silently picking whichever ref ls-remote listed first.
-            if best >= 3 and sum(
-                1 for _, r in matching_tags if _ref_specificity(r) == best
-            ) > 1:
+            if best >= 3 and sum(1 for _, r in matching_tags if _ref_specificity(r) == best) > 1:
                 return {
                     "sdk": sdk,
                     "alias": version,
