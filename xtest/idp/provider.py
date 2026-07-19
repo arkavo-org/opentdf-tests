@@ -50,6 +50,10 @@ class IdpProvider(BaseModel):
     tier: Literal["local", "external"] = "external"
     # Who re-ups the tenant credentials when they expire.
     owner: str = ""
+    # False while the tenant/secrets don't exist yet: the provider never gates
+    # a run (skips with a pointer to its setup runbook, even --idp-strict) and
+    # the nightly matrix excludes it. Flip to true once the tenant is live.
+    onboarded: bool = True
     issuer: str
     audience: str
     client_id: str

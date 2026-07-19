@@ -1,13 +1,14 @@
 # Deploy the community SDK conformance homepage to GitHub Pages (main only).
 # Consumes every community-* artifact (python/rust/swift stage-1 + stage-2)
 # from the triggering Community X-Test run, or from the latest completed
-# main-branch run on manual dispatch. Deploys on failure conclusions too, so
+# main-branch run on manual dispatch. Also folds in the IdP conformance matrix
+# from the latest IdP Conformance run. Deploys on failure conclusions too, so
 # the page honestly shows red instead of going stale.
 name: Community Conformance Pages
 
 on:
   workflow_run:
-    workflows: ["Community X-Test"]
+    workflows: ["Community X-Test", "IdP Conformance"]
     types: [completed]
     branches: [main]
   workflow_dispatch:
@@ -42,7 +43,10 @@ jobs:
         with:
           script: |
             let run = context.payload.workflow_run;
-            if (!run) {
+            // Only the Community X-Test run carries the SDK artifacts; when
+            // anything else triggers us (IdP Conformance, manual dispatch),
+            // fall back to the latest completed main-branch run.
+            if (!run || run.name !== 'Community X-Test') {
               const runs = await github.rest.actions.listWorkflowRuns({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -70,6 +74,41 @@ jobs:
         with:
           pattern: "*community-*stage*"
           run-id: ${{ steps.source-run.outputs.run-id }}
+          github-token: ${{ github.token }}
+          path: artifact-download
+
+      - name: Locate latest IdP Conformance run
+        id: idp-run
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            let run = context.payload.workflow_run;
+            if (!run || run.name !== 'IdP Conformance') {
+              const runs = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'idp-conformance.yml',
+                branch: 'main',
+                status: 'completed',
+                per_page: 1,
+              });
+              run = runs.data.workflow_runs[0];
+            }
+            if (!run) {
+              core.info('No completed IdP Conformance run found; page has no IdP section');
+              return;
+            }
+            core.info(`Using IdP run ${run.id} (${run.html_url})`);
+            core.setOutput('run-id', run.id);
+
+      # The results- filter excludes the failure-only idp-conformance-logs-* artifacts.
+      - name: Download IdP conformance artifacts
+        if: steps.idp-run.outputs.run-id != ''
+        continue-on-error: true # missing IdP artifacts never block the page
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: "*idp-conformance-results-*"
+          run-id: ${{ steps.idp-run.outputs.run-id }}
           github-token: ${{ github.token }}
           path: artifact-download
 

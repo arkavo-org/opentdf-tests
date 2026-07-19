@@ -5,6 +5,8 @@ name: cognito
 display_name: "AWS Cognito"
 tier: external
 owner: "@unassigned"
+# Not onboarded until a real user pool + IDP_COGNITO_* secrets exist (docs/idp-setup/cognito.md).
+onboarded: false
 issuer: "https://cognito-idp.${IDP_COGNITO_REGION}.amazonaws.com/${IDP_COGNITO_USER_POOL_ID}"
 audience: "${IDP_COGNITO_CLIENT_ID}"
 client_id: "${IDP_COGNITO_CLIENT_ID}"

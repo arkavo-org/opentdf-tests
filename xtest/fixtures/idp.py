@@ -132,6 +132,12 @@ class IdpSession:
 def idp(request: pytest.FixtureRequest) -> IdpSession:
     resolved = load_provider(typing.cast(str, request.param))
     strict = bool(request.config.getoption("--idp-strict"))
+    if not resolved.provider.onboarded:
+        # Never gates a run, even --idp-strict: there is no tenant to test.
+        pytest.skip(
+            f"IdP provider {resolved.provider.name!r} is not onboarded yet "
+            f"(onboarded: false) — see docs/idp-setup/{resolved.provider.name}.md"
+        )
     if not resolved.ready:
         msg = (
             f"IdP provider {resolved.provider.name!r} is missing environment "

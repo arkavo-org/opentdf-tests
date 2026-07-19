@@ -82,6 +82,7 @@ which skip the provider (or fail it under `--idp-strict`).
 | `display_name` | Human label for reports. |
 | `tier` | `local` (always available, e.g. Keycloak dev realm) or `external` (needs secrets). PRs run local only. |
 | `owner` | Who re-ups the tenant credentials when they expire. |
+| `onboarded` | `false` while the tenant/secrets don't exist yet: the provider never gates a run (skips with a pointer to its runbook, even `--idp-strict`) and the nightly matrix excludes it. Flip to `true` once the tenant is live. |
 | `issuer` | OIDC issuer URL. Compared **exactly** against the discovery document and the platform config — keep trailing slashes as the IdP emits them. |
 | `audience` | The value the platform expects in the token's `aud` claim. |
 | `client_id` / `client_secret` | Client-credentials grant client. Usually `${IDP_<NAME>_CLIENT_ID}` / `${IDP_<NAME>_CLIENT_SECRET}`. |
@@ -109,6 +110,8 @@ which skip the provider (or fail it under `--idp-strict`).
    passes the standard ones through; extend the env block in
    `.github/workflows/idp-conformance.yml` for new variable names).
 6. Assign an `owner` — see Credential ownership below.
+7. Once the tenant is live and a manual run passes, set `onboarded: true` —
+   the provider joins the nightly matrix and starts gating scheduled runs.
 
 ## The checks
 
@@ -130,13 +133,19 @@ which skip the provider (or fail it under `--idp-strict`).
 
 - **Pull requests** (path-filtered to the suite): keycloak tier only — no
   secrets are available on PRs, and the local tier validates the suite itself.
-- **Nightly** (`17 7 * * *`): full provider matrix with `--idp-strict`. On
+- **Nightly** (`17 7 * * *`): the local tier plus every **onboarded** external
+  provider, run with `--idp-strict`. Non-onboarded templates are excluded at
+  matrix-resolution time so an un-donated tenant never fails the run. On
   failure the workflow opens or updates a GitHub issue labeled
   `idp-conformance`. A nightly failure is often "the provider changed
   something" or an expired tenant secret — it pages the provider owner instead
   of wedging main.
 - **`workflow_dispatch` / `workflow_call`**: `providers` ("all" or
   space-separated names), `platform-ref`, and `otdfctl-ref` inputs.
+- **Publishing**: the Community Conformance Pages workflow
+  (`community-pages.yml`) rebuilds on IdP Conformance completion and folds the
+  latest run's `idp-conformance-results-*` artifacts into the site — the IdP
+  matrix renders alongside the SDK matrices.
 
 External-tier jobs do **not** use the Keycloak-bundled startup action. They
 check out `opentdf/platform`, start only Postgres from its docker-compose,

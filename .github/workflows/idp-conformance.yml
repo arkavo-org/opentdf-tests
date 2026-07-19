@@ -89,8 +89,20 @@ jobs:
       PLATFORM_REF_IN: ${{ inputs.platform-ref || 'latest' }}
       OTDFCTL_REF_IN: ${{ inputs.otdfctl-ref || 'latest' }}
     steps:
+      # The reusable workflow may be invoked cross-repo (platform repo caller):
+      # github.workflow_ref always points at THIS workflow's repo@ref, which is
+      # where the test code lives — derive the checkout from it.
+      - name: Called repo handle
+        id: called
+        run: |
+          wr="${{ github.workflow_ref }}"
+          echo "repo=${wr%%/.github/workflows/*}" >> "$GITHUB_OUTPUT"
+          echo "ref=${wr##*@}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          repository: ${{ steps.called.outputs.repo }}
+          ref: ${{ steps.called.outputs.ref }}
           path: otdftests
           persist-credentials: false
 
@@ -116,6 +128,11 @@ jobs:
             [ -f "$f" ] || { echo "unknown provider: $n" >&2; exit 1; }
             tier=$(grep -E '^tier:' "$f" | awk '{print $2}')
             [ -n "$tier" ] || { echo "provider $n has no tier" >&2; exit 1; }
+            onboarded=$(grep -E '^onboarded:' "$f" | awk '{print $2}')
+            if [ "$tier" = "external" ] && [ "$onboarded" = "false" ]; then
+              echo "excluding $n (external, onboarded=false)" >&2
+              continue
+            fi
             [ "$first" = "0" ] && out="$out,"
             out="$out{\"name\":\"$n\",\"tier\":\"$tier\"}"
             first=0
@@ -189,9 +206,18 @@ jobs:
       IDP_GOOGLE_CLIENT_ID: ${{ secrets.IDP_GOOGLE_CLIENT_ID }}
       IDP_GOOGLE_CLIENT_SECRET: ${{ secrets.IDP_GOOGLE_CLIENT_SECRET }}
     steps:
+      - name: Called repo handle
+        id: called
+        run: |
+          wr="${{ github.workflow_ref }}"
+          echo "repo=${wr%%/.github/workflows/*}" >> "$GITHUB_OUTPUT"
+          echo "ref=${wr##*@}" >> "$GITHUB_OUTPUT"
+
       - name: Checkout tests
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          repository: ${{ steps.called.outputs.repo }}
+          ref: ${{ steps.called.outputs.ref }}
           path: otdftests
           persist-credentials: false
 
@@ -344,14 +370,14 @@ jobs:
         if: success() || failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ job.status == 'success' && '✅' || '❌' }} idp-conformance-${{ matrix.provider.name }}
+          name: ${{ job.status == 'success' && '✅' || '❌' }} idp-conformance-results-${{ matrix.provider.name }}
           path: otdftests/xtest/test-results/**
 
       - name: Upload platform logs on failure
         if: failure()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: idp-conformance-${{ matrix.provider.name }}-server-logs
+          name: idp-conformance-logs-${{ matrix.provider.name }}
           path: ${{ steps.platform-dir.outputs.log }}
           if-no-files-found: ignore
 

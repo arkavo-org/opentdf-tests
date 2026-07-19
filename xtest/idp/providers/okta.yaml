@@ -5,6 +5,8 @@ name: okta
 display_name: "Okta"
 tier: external
 owner: "@unassigned"
+# Not onboarded until a real tenant + IDP_OKTA_* secrets exist (docs/idp-setup/okta.md).
+onboarded: false
 issuer: "https://YOUR_DOMAIN.okta.com/oauth2/default"
 audience: "http://localhost:8080"
 client_id: "${IDP_OKTA_CLIENT_ID}"

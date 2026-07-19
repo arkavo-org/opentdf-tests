@@ -14,7 +14,11 @@ dpop_client_id: "opentdf-dpop"
 dpop_client_secret: "secret"
 token_endpoint_params: {}
 capabilities:
-  dpop: true
+  # The dev realm does not bind DPoP tokens today (the opentdf-dpop client's
+  # binding attribute is not honored), so treat support as unknown rather than
+  # letting --idp-strict page on it nightly. Platform-side DPoP is covered by
+  # test_dpop.py.
+  dpop:
   # No provisioned client without the platform audience mapper today.
   custom_audience: false
   configurable_token_lifetime: false

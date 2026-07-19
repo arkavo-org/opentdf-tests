@@ -5,6 +5,8 @@ name: auth0
 display_name: "Auth0"
 tier: external
 owner: "@unassigned"
+# Not onboarded until a real tenant + IDP_AUTH0_* secrets exist (docs/idp-setup/auth0.md).
+onboarded: false
 # Auth0 issuers end with a trailing slash, and the platform compares issuer
 # strings exactly — keep the slash.
 issuer: "https://YOUR_TENANT.us.auth0.com/"

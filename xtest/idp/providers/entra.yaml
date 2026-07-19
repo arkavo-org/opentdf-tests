@@ -5,6 +5,8 @@ name: entra
 display_name: "Microsoft Entra ID"
 tier: external
 owner: "@unassigned"
+# Not onboarded until a real tenant + IDP_ENTRA_* secrets exist (docs/idp-setup/entra.md).
+onboarded: false
 issuer: "https://login.microsoftonline.com/${IDP_ENTRA_TENANT_ID}/v2.0"
 # App ID URI (or app client ID) of the "OpenTDF platform" app registration.
 audience: "${IDP_ENTRA_AUDIENCE}"

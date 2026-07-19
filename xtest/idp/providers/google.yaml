@@ -6,6 +6,8 @@ name: google
 display_name: "Google (stub — no client-credentials grant)"
 tier: external
 owner: "@unassigned"
+# Stub: needs a jwt-bearer grant extension (docs/idp-setup/google.md) before onboarding.
+onboarded: false
 issuer: "https://accounts.google.com"
 audience: "${IDP_GOOGLE_AUDIENCE}"
 client_id: "${IDP_GOOGLE_CLIENT_ID}"
