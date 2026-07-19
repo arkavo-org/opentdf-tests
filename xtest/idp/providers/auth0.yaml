@@ -27,8 +27,11 @@ ers:
   required_claims: [sub]
 platform_overlay:
   dpop_enforce: false
-  # Auth0 tokens carry no platform role claims, and v1 casbin subjects are the
-  # token's groups + sub. Grant the M2M client (sub = "<client_id>@clients")
-  # the admin role so ERS/policy calls are authorized.
+  # Auth0 M2M tokens carry no platform role claims, and the released platform's
+  # v1 casbin subjects are the groups claim only. Point the groups claim at
+  # gty (always "client-credentials" for M2M tokens) and grant that group the
+  # admin role so ERS/policy calls are authorized. Safe here only because the
+  # tenant is dedicated to conformance with a single client.
+  casbin_groups_claim: gty
   casbin_extension: |
-    g, ${IDP_AUTH0_CLIENT_ID}@clients, role:admin
+    g, client-credentials, role:admin

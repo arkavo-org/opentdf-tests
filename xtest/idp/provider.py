@@ -41,9 +41,13 @@ class ErsConfig(BaseModel):
 
 class PlatformOverlay(BaseModel):
     dpop_enforce: bool = False
-    # Extra casbin policy lines (server.auth.policy.extension) — e.g. grant the
-    # provider's client a platform role it has no IdP claim for.
+    # Extra casbin policy lines (server.auth.policy.extension) — e.g. grant a
+    # group from the provider's token claims a platform role.
     casbin_extension: str | None = None
+    # Where casbin looks for group/role subjects (server.auth.policy.groups_claim;
+    # platform default realm_access.roles). External IdPs whose M2M tokens
+    # carry no roles need a claim that exists, e.g. Auth0's gty.
+    casbin_groups_claim: str | None = None
 
 
 class IdpProvider(BaseModel):

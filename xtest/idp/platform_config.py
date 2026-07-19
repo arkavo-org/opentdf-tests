@@ -38,6 +38,10 @@ def render_overlay(provider_name: str, base_path: Path) -> dict[str, Any]:
         auth.setdefault("policy", {})["extension"] = (
             provider.platform_overlay.casbin_extension
         )
+    if provider.platform_overlay.casbin_groups_claim:
+        auth.setdefault("policy", {})["groups_claim"] = (
+            provider.platform_overlay.casbin_groups_claim
+        )
     config.setdefault("services", {}).setdefault("entityresolution", {})["mode"] = (
         provider.ers.mode
     )

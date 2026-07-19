@@ -96,7 +96,8 @@ which skip the provider (or fail it under `--idp-strict`).
 | `ers.mode` | `keycloak` \| `claims` \| `multi-strategy` — rendered into the platform overlay. |
 | `ers.required_claims` | Claims the ERS mode needs from the token (default `[sub]`). |
 | `platform_overlay.dpop_enforce` | Rendered into `server.auth.dpop.enforce` in the overlay. |
-| `platform_overlay.casbin_extension` | Extra casbin policy lines appended to the builtin policy (`server.auth.policy.extension`) — e.g. Auth0 grants its M2M client (`sub = "<client_id>@clients"`) the admin role, since the token carries no platform role claims. |
+| `platform_overlay.casbin_extension` | Extra casbin policy lines appended to the builtin policy (`server.auth.policy.extension`) — e.g. grant a token claim value the platform admin role. |
+| `platform_overlay.casbin_groups_claim` | Which token claim casbin reads group/role subjects from (`server.auth.policy.groups_claim`; platform default `realm_access.roles`). Auth0 uses `gty` (always `client-credentials` for M2M tokens) since its tokens carry no roles claim. |
 
 ### Adding a new provider
 
