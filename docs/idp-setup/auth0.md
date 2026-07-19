@@ -107,7 +107,7 @@ the platform, `uv run pytest test_idp_conformance.py --idp-providers auth0 -v`).
 - **`tdf_roundtrip` xfails with the go SDK** — the SDK attaches an RS256 DPoP
   proof to every token request (no opt-out), which Auth0 rejects
   (`invalid_dpop_proof`). Tracked as
-  [arkavo-org/platform#2](https://github.com/arkavo-org/platform/issues/2);
+  [arkavo-org/opentdf-platform#25](https://github.com/arkavo-org/opentdf-platform/issues/25);
   the check is marked `known_issues` in the provider config, so it reports as
   xfail (not a failure) and will XPASS once the SDK is fixed.
 
