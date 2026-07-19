@@ -25,7 +25,10 @@ class DiscoveryDocument:
 
 def fetch_discovery(issuer: str) -> DiscoveryDocument:
     url = issuer.rstrip("/") + "/.well-known/openid-configuration"
-    response = requests.get(url, timeout=HTTP_TIMEOUT)
+    try:
+        response = requests.get(url, timeout=HTTP_TIMEOUT)
+    except requests.RequestException as e:
+        raise AssertionError(f"OIDC discovery request failed for {issuer}: {e}") from e
     assert response.status_code == 200, (
         f"OIDC discovery failed for {issuer}: "
         f"{response.status_code} {response.text[:300]}"
@@ -40,7 +43,10 @@ def fetch_discovery(issuer: str) -> DiscoveryDocument:
 
 
 def fetch_jwks(jwks_uri: str) -> dict[str, Any]:
-    response = requests.get(jwks_uri, timeout=HTTP_TIMEOUT)
+    try:
+        response = requests.get(jwks_uri, timeout=HTTP_TIMEOUT)
+    except requests.RequestException as e:
+        raise AssertionError(f"JWKS request failed for {jwks_uri}: {e}") from e
     assert response.status_code == 200, (
         f"JWKS fetch failed for {jwks_uri}: "
         f"{response.status_code} {response.text[:300]}"
@@ -85,17 +91,24 @@ def get_client_credentials_token(
             headers["DPoP"] = dpop_key.sign_dpop_proof(
                 htm="POST", htu=token_endpoint, nonce=nonce
             )
-        return requests.post(
-            token_endpoint,
-            auth=(client_id, client_secret),
-            data=data,
-            headers=headers,
-            timeout=HTTP_TIMEOUT,
-        )
+        try:
+            return requests.post(
+                token_endpoint,
+                auth=(client_id, client_secret),
+                data=data,
+                headers=headers,
+                timeout=HTTP_TIMEOUT,
+            )
+        except requests.RequestException as e:
+            raise AssertionError(
+                f"token request to {token_endpoint} failed: {e}"
+            ) from e
 
     response = post()
+    # RFC 9449 nonce challenges may come back as 400 or 401 — retry once with
+    # the issued nonce in either case.
     nonce = response.headers.get("DPoP-Nonce")
-    if response.status_code == 400 and nonce and dpop_key is not None:
+    if response.status_code in (400, 401) and nonce and dpop_key is not None:
         response = post(nonce)
 
     assert response.status_code == 200, (

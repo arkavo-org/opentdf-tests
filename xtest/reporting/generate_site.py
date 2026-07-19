@@ -131,6 +131,10 @@ class IdpCheck:
     reason: str | None = None
 
     def merge(self, status: str, reason: str | None) -> None:
+        # Worst outcome wins (failed > passed > skipped); an upgrade resets the
+        # reason. Skip reasons are only accumulated while the merged status is
+        # skipped — a skip reason arriving after a failure is dropped, so a
+        # mixed fail+skip check reads as a plain failure with no annotation.
         if _IDP_STATUS_RANK[status] > _IDP_STATUS_RANK[self.status]:
             self.status = status
             self.reason = None

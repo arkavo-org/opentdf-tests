@@ -17,8 +17,10 @@ token_endpoint_params:
   scope: "${IDP_ENTRA_AUDIENCE}/.default"
 capabilities:
   dpop: false
-  # Request the .default scope of a second app registration instead.
-  custom_audience: true
+  # Entra's audience is scope-driven, not `audience`-param driven; the generic
+  # wrong_audience test assumes Auth0's `audience` param and does not apply
+  # here until the mechanism is generalized.
+  custom_audience: false
   configurable_token_lifetime: false
 ers:
   mode: claims
