@@ -40,4 +40,4 @@ known_issues:
   # opt-out); Auth0 rejects it (invalid_dpop_proof, alg not allowed).
   - check: tdf_roundtrip
     reason: "go SDK sends an RS256 DPoP proof at token acquisition; Auth0 rejects it"
-    issue: "https://github.com/arkavo-org/platform/issues/2"
+    issue: "https://github.com/arkavo-org/opentdf-platform/issues/25"
