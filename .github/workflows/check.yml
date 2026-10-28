@@ -11,6 +11,9 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
+    env:
+      # Keep locked native dependencies on the supported interpreter.
+      UV_PYTHON: "3.14"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -33,6 +36,9 @@ jobs:
           uv run ruff check .
           uv run ruff format --check .
           uv run pyright
+        working-directory: xtest
+      - name: Test xtest CLI format dispatch
+        run: uv run pytest test_sdk_cli_formats.py --no-audit-logs
         working-directory: xtest
       - name: Lint and test otdf-local
         run: |
