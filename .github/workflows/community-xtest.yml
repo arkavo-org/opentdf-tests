@@ -10,8 +10,8 @@
 #   - python × rust × swift (macos; CryptoKit for OpenTDFKit)
 #
 # Swift stays on macOS (CryptoKit). macOS platform is native Postgres+Keycloak+go
-# (no Docker/Colima). Python is pinned to the upstream spec-container fix;
-# other defaults float on `latest` release tags.
+# (no Docker/Colima). Python is pinned to the upstream spec-container fix and
+# platform to the upstream policy-binding fix; other defaults float on `latest`.
 #
 # Stage-1 jobs also run dormant feature lanes (test_dpop.py everywhere;
 # test_pqc.py on ubuntu, where a km1 key-management KAS is started). Cases
@@ -67,7 +67,9 @@ on:
       platform-ref:
         required: false
         type: string
-        default: latest
+        # Merged KAS policy-binding fix (opentdf/platform#4223).
+        # Replace with a containing service release once one is published.
+        default: d93702892ebf4242dd29346519cf12115c860521
         description: "opentdf/platform ref: 'latest'/'lts', branch, tag (service/vX.Y.Z), or SHA"
       otdfctl-ref:
         required: false
@@ -91,8 +93,8 @@ permissions:
   contents: read
 
 jobs:
-  # Expand floating `latest`/`lts` aliases once per workflow run. Concrete tags
-  # are pinned only for this run (not hard-coded in YAML).
+  # Expand floating `latest`/`lts` aliases once per workflow run; explicit pins
+  # and ref overrides pass through unchanged.
   resolve-refs:
     name: Resolve floating release pins
     runs-on: ubuntu-latest
@@ -108,7 +110,8 @@ jobs:
       rust-ref: ${{ steps.resolve.outputs.rust-ref }}
       swift-ref: ${{ steps.resolve.outputs.swift-ref }}
     env:
-      PLATFORM_REF_IN: ${{ inputs.platform-ref || 'latest' }}
+      # Match workflow_dispatch's merged KAS fix; push/PR have no inputs.
+      PLATFORM_REF_IN: ${{ inputs.platform-ref || 'd93702892ebf4242dd29346519cf12115c860521' }}
       OTDFCTL_REF_IN: ${{ inputs.otdfctl-ref || 'latest' }}
       # Match workflow_dispatch's upstream spec-container fix; push/PR have no inputs.
       PYTHON_REF_IN: ${{ inputs.python-ref || '42164681ddae1cc161331f835b3358dc7442052f' }}
