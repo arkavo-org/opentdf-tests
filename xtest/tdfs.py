@@ -160,14 +160,14 @@ def normalize_container(name: str) -> container_type:
     )
 
 
-def wire_cli_format(container: container_type) -> str:
-    """Format token passed as the 4th argument to official sdk/*/cli.sh.
+def wire_cli_format(container: container_type, sdk: sdk_type | None = None) -> str:
+    """Format token passed as the 4th argument to sdk/*/cli.sh.
 
-    Historical go/java/js shims expect the string ``ztdf`` for Base TDF ZIP
-    containers. Community shims accept ``tdf`` and ``ztdf`` as synonyms.
+    Swift uses ``tdf`` for Base TDF ZIP containers. Other SDK shims retain
+    the historical ``ztdf`` token. EC wrapping is selected via the environment.
     """
     if container in ("tdf", "tdf-ecwrap"):
-        return "ztdf"
+        return "tdf" if sdk == "swift" else "ztdf"
     return container
 
 
@@ -570,9 +570,9 @@ def fmt_env(env: dict[str, str]) -> str:
     return " ".join(a)
 
 
-def simple_container(container: container_type) -> str:
-    """Reduce profile to the wire format for cli.sh (Base TDF → legacy 'ztdf')."""
-    return wire_cli_format(container)
+def simple_container(container: container_type, sdk: sdk_type | None = None) -> str:
+    """Reduce a profile to the selected SDK's cli.sh format token."""
+    return wire_cli_format(container, sdk)
 
 
 class SDK:
@@ -621,7 +621,7 @@ class SDK:
         target_mode: container_version | None = None,
     ):
         use_ecwrap = container == "tdf-ecwrap"
-        fmt = simple_container(container)
+        fmt = simple_container(container, self.sdk)
         c = [
             self.path,
             "encrypt",
@@ -670,7 +670,7 @@ class SDK:
         kasallowlist: str = "",
         ignore_kas_allowlist: bool = False,
     ):
-        fmt = simple_container(container)
+        fmt = simple_container(container, self.sdk)
 
         c = [
             self.path,

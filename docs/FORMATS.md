@@ -23,7 +23,9 @@ and software stacks. See also [opentdf.io/spec](https://opentdf.io/spec) and
 Legacy OpenTDF tooling (including official `cli.sh` 4th-argument wire format)
 often used the string `ztdf` for Base TDF ZIP containers. The harness still
 **accepts** that alias and still **emits** `ztdf` on the wire to go/java/js
-shims. Canonical names in pytest, docs, and CI are `tdf` / `tdf-ecwrap`.
+shims. Swift receives `tdf`, matching OpenTDFKitCLI's format name. EC wrapping
+is selected through `XT_WITH_ECWRAP`, rather than a separate format token.
+Canonical names in pytest, docs, and CI are `tdf` / `tdf-ecwrap`.
 
 ```bash
 # Preferred

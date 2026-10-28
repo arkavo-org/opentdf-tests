@@ -34,6 +34,9 @@ jobs:
           uv run ruff format --check .
           uv run pyright
         working-directory: xtest
+      - name: Test xtest CLI format dispatch
+        run: uv run pytest test_sdk_cli_formats.py --no-audit-logs
+        working-directory: xtest
       - name: Lint and test otdf-local
         run: |
           uv sync
